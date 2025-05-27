@@ -1,0 +1,14 @@
+# derived from https://github.com/devcontainers/images/blob/main/src/base-ubuntu/.devcontainer/devcontainer.json
+# modify as needed
+# [Choice] Ubuntu version (use jammy on local arm64/Apple Silicon): jammy, focal
+ARG VARIANT="jammy"
+FROM buildpack-deps:${VARIANT}-curl
+
+LABEL dev.containers.features="common"
+
+# common modifications such as installing packages, adding users, etc. should go here
+# [Optional] Uncomment this section to install additional OS packages.
+# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+#     && apt-get -y install --no-install-recommends
+#     <your-package-list-here> \
+#     && rm -rf /var/lib/apt/lists/*
