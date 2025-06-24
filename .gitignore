@@ -1,4 +1,11 @@
-.vscode/
+# .vscode/
 
 .env
 .DS_Store
+
+node_modules
+out
+dist
+.vscode-test/
+*.vsix
+.venv

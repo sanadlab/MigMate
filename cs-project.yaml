@@ -1,7 +1,7 @@
 # enter the details of the project here
 project:
-  name: ''
+  name: 'LibMig Plugin'
   code: ''
-  year: ''
-  description: ''
-  supervisor: ''
+  year: '2025'
+  description: 'A plugin to integrate the existing LibMig tool into VS Code. Part of a CS Capstone project.'
+  supervisor: 'Sarah Nadi and May Mahmoud'

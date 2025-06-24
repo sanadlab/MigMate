@@ -1,0 +1,121 @@
+{
+  "name": "libmig-prototype",
+  "displayName": "LibMig",
+  "description": "A (prototype) plugin for LibMig",
+  "license": "SEE LICENSE IN LICENSE",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:python",
+    "onLanguage:pip-requirements",
+    "workspaceContains:requirements.txt"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "libmig.helloWorld",
+        "title": "Hello World",
+        "category": "LibMig"
+      },
+      {
+        "command": "libmig.migrate",
+        "title": "Migrate a Library",
+        "category": "LibMig"
+      },
+      {
+        "command": "libmig.viewDiff",
+        "title": "Show Migration Preview",
+        "category": "LibMig"
+      },
+      {
+        "command": "libmig.backup",
+        "title": "Backup a file before migrating",
+        "category": "LibMig"
+      },
+      {
+        "command": "libmig.restore",
+        "title": "Restore a migrated file",
+        "category": "LibMig"
+      }
+    ],
+    "configuration":[
+      {
+        "title": "LibMig",
+        "type": "object",
+        "properties": {
+          "libmig.enableFeatureX": {
+            "type":"boolean",
+            "default": true,
+            "description": "Enable or disable feature X"
+          },
+          "libmig.path.setCustomPath": {
+            "type":"string",
+            "default": "./MyProject",
+            "description": "Enter a path to the desired directory"
+          }
+        }
+      }
+    ],
+    "icons": {
+      "libmig-icon": {
+        "description": "Cover icon for libmig view",
+        "default": "library"
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceFilename == requirements.txt || resourceFilename == requirements-dev.txt",
+          "command": "libmig.migrate",
+          "group": "navigation"
+        }
+      ]
+    },
+    "views": {
+      "libmig-view": [
+        {
+          "id": "libmig-libraries",
+          "name": "Detected Libraries"
+        },
+        {
+          "id": "libmig-results",
+          "name": "Test Results"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "libmig-view",
+          "title": "LibMig",
+          "icon": "media/library-icon.svg"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.101.0",
+    "@typescript-eslint/eslint-plugin": "^8.28.0",
+    "@typescript-eslint/parser": "^8.28.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.29.0",
+    "typescript": "^5.8.2"
+  }
+}
