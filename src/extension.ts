@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { exec } from 'child_process';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -6,6 +7,18 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "LibMig" is now active!');
 	const activeEditor = vscode.window.activeTextEditor;
 	console.log('Language trigger:', activeEditor?.document.languageId);
+
+
+
+	// // // WIP Configuration Handling
+	let myConfig = vscode.workspace.getConfiguration('libmig');
+	console.log(`Using LLM Client: ${myConfig.get('flags.LLMClient')}`);
+	vscode.workspace.onDidChangeConfiguration(event => {
+		if (event.affectsConfiguration('libmig')) {
+			console.log("Update LibMig configuration");
+			myConfig = vscode.workspace.getConfiguration('libmig');
+		}
+	});
 
 
 
@@ -24,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 				if (word) {
 					console.log(`Hover detected on word: ${word}`);
 					const markdown = new vscode.MarkdownString(
-						`[Migrate '${word}'](command:libmig.migrate?${JSON.stringify(word)})`
+						`**LibMig Plugin:**\n\n[Migrate \`${word}\`](command:libmig.migrate?${JSON.stringify(word)})`
 					);
 					markdown.isTrusted = true;
 					return new vscode.Hover(markdown);
@@ -60,7 +73,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// // Parse requirements.txt to get library names
 	async function getLibrariesFromRequirements(): Promise<string[]> {
 		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
+		if (!editor || !editor.document.fileName.endsWith('requirements.txt')) {
 			return [];
 		}
 		const text = editor.document.getText();
@@ -81,7 +94,6 @@ export function activate(context: vscode.ExtensionContext) {
 	// // WIP library migration
 	const migrateCommand = vscode.commands.registerCommand('libmig.migrate', async (hoverLibrary?: string) => {
 		console.log('Beginning migration...');
-		// const libraries = ['requests', 'numpy', 'pandas', 'flask']; // replace w/ options in requirements.txt
 		const libraries = await getLibrariesFromRequirements();
 
 		if (libraries.length <= 0) {
@@ -121,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 		const originalText = editor.document.getText();
-		const updatedText = originalText.replace(/requests/g, 'httpx');
+		const updatedText = originalText.replace(/requests/g, 'httpx'); // hardcoded for now
 		const originalUri = vscode.Uri.parse('original:Original.py');
 		const updatedUri = vscode.Uri.parse('updated:Updated.py');
 
@@ -165,6 +177,23 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(backupCommand, restoreCommand);
+
+	// // Alternative Library Migration w/ Configuration
+	const altMigration = vscode.commands.registerCommand('libmig.altMigrate', () => {
+		const libmigFlags = [myConfig.get<boolean>('flags.forceRerun')];
+		if (libmigFlags[0]) {console.log("'Force rerun' enabled");}
+		exec('libmig --help', (err, stdout, stderr) => {
+			if (err) {
+				vscode.window.showErrorMessage(`Error: ${err.message}`);
+				return;
+			}
+			if (stderr) {
+				vscode.window.showWarningMessage(`Stderr: ${stderr}`);
+			}
+			vscode.window.showInformationMessage(`Output: ${stdout}`);
+		});
+	});
+	context.subscriptions.push(altMigration);
 }
 
 export function deactivate() {}

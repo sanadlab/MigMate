@@ -42,6 +42,11 @@
         "command": "libmig.restore",
         "title": "Restore a migrated file",
         "category": "LibMig"
+      },
+      {
+        "command": "libmig.altMigrate",
+        "title": "Migrate using CLI tool",
+        "category": "LibMig"
       }
     ],
     "configuration":[
@@ -49,15 +54,64 @@
         "title": "LibMig",
         "type": "object",
         "properties": {
-          "libmig.enableFeatureX": {
+          "libmig.options.previewOnMigrationFailure": {
             "type":"boolean",
-            "default": true,
-            "description": "Enable or disable feature X"
+            "default": false,
+            "description": "Show a preview for failed migrations"
           },
-          "libmig.path.setCustomPath": {
+          "libmig.flags.forceRerun": {
+            "type":"boolean",
+            "default": false,
+            "description": "Forcefully rerun the migration"
+          },
+          "libmig.flags.smartSkipTests": {
+            "type":"boolean",
+            "default": false,
+            "markdownDescription": "Skip running tests if they are already done. Tests are considered done if: \n\n1. No new files are migrated \n\n2. test-report.json file exists \n\n3. cov-report.json both exists"
+          },
+          "libmig.flags.maxFileCount": {
+            "type":"integer",
+            "default": 20,
+            "description": "Set the maximum number of files to migrate"
+          },
+          "libmig.flags.LLMClient": {
             "type":"string",
-            "default": "./MyProject",
-            "description": "Enter a path to the desired directory"
+            "enum": ["openai", "claude", "gemini"],
+            "default": "openai",
+            "description": "Select an LLM client to use for migrations"
+          },
+          "libmig.flags.previewGrouping": {
+            "type":"string",
+            "enum": ["One-by-one", "All at once"],
+            "default": "One-by-one",
+            "description": "Choose how migrated files are shown during preview"
+          },
+          "libmig.flags.migrationRounds": {
+            "type":"array",
+            "items": {"type": "string"},
+            "enum": ["premig", "llmmig", "postmig"],
+            "default": [],
+            "description": "Show a preview for failed migrations"
+          },
+          "libmig.options.pytestFlags": {
+            "type":"string",
+            "default": "-vv",
+            "description": "Set additional flags for running Pytest tests"
+          },
+          "libmig.flags.testSuitePath": {
+            "type":"string",
+            "default": "/tests",
+            "description": "Set the default location to look for test files"
+          },
+          "libmig.flags.outputPath": {
+            "type":"string",
+            "default": ".libmig",
+            "description": "Set the path to the desired output directory"
+          },
+          "libmig.options.requirementFileName": {
+            "type":"string",
+            "default": "requirements.txt",
+            "description": "Set the default name for the requirement file"
           }
         }
       }
