@@ -80,6 +80,23 @@ export function activate(context: vscode.ExtensionContext) {
 		const libraries = text.match(/[a-zA-Z0-9-_]+/g) || [];
 		return Array.from(new Set(libraries));
 	}
+	// // Run target command in CLI
+	function runCliTool(command: string, cwd: string) {
+		return new Promise<void>((resolve, reject) => {
+			exec(command, {cwd}, (err, stdout, stderr) => {
+				if (err) {
+					vscode.window.showErrorMessage(`Error: ${err.message}`);
+					reject(err);
+					return;
+				}
+				if (stderr) {
+					vscode.window.showWarningMessage(`Stderr: ${stderr}`);
+				}
+				vscode.window.showInformationMessage(`Output: ${stdout}`);
+				resolve();
+			});
+		});
+	}
 
 
 
@@ -181,7 +198,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// // Alternative Library Migration w/ Configuration
 	const altMigration = vscode.commands.registerCommand('libmig.altMigrate', () => {
 		const libmigFlags = [myConfig.get<boolean>('flags.forceRerun')];
-		if (libmigFlags[0]) {console.log("'Force rerun' enabled");}
+		if (libmigFlags[0] !== null) {console.log("Force rerun flag:", libmigFlags[0]);}
 		exec('libmig --help', (err, stdout, stderr) => {
 			if (err) {
 				vscode.window.showErrorMessage(`Error: ${err.message}`);
@@ -194,6 +211,37 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 	});
 	context.subscriptions.push(altMigration);
+
+	// // Testing direct CLI call
+	const migrateSpawn = vscode.commands.registerCommand('libmig.callLibMig', async () => {
+		// // Run from open directory instead of VS Code installation path
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            vscode.window.showErrorMessage('No workspace folder is open. Please open a project to run this command.');
+            return;
+        }
+        const cwd = workspaceFolders[0].uri.fsPath;
+		console.log("Directory:", cwd);
+
+		// // Take input for user arguments
+		const sourceLib = await vscode.window.showInputBox({ prompt: 'Enter the source library' });
+		const targetLib = await vscode.window.showInputBox({ prompt: 'Enter the target library' });
+
+		// // Set flags based on config (WIP)
+		const pythonVersion = myConfig.get<string>('flags.pythonVersion');
+		const forceRerun = myConfig.get<boolean>('flags.forceRerun');
+
+		if (sourceLib && targetLib && pythonVersion) {
+			let command = `libmig ${sourceLib} ${targetLib} --python-version=${pythonVersion}`;
+			// // Add additional args to command if needed
+			if (forceRerun) { command += ' --force-rerun'; }
+			vscode.window.showInformationMessage('Starting migration...');
+			await runCliTool(command, cwd);
+		} else {
+			vscode.window.showErrorMessage('Migration cancelled: Missing required inputs.');
+		}
+	});
+	context.subscriptions.push(migrateSpawn);
 }
 
 export function deactivate() {}

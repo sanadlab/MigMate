@@ -47,6 +47,11 @@
         "command": "libmig.altMigrate",
         "title": "Migrate using CLI tool",
         "category": "LibMig"
+      },
+      {
+        "command": "libmig.callLibMig",
+        "title": "Migrate using CLI tool",
+        "category": "LibMig"
       }
     ],
     "configuration":[
@@ -92,6 +97,11 @@
             "enum": ["premig", "llmmig", "postmig"],
             "default": [],
             "description": "Show a preview for failed migrations"
+          },
+          "libmig.flags.pythonVersion": {
+            "type":"string",
+            "default": "3.12",
+            "description": "Enter the Python version"
           },
           "libmig.options.pytestFlags": {
             "type":"string",
