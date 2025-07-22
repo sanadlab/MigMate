@@ -1,6 +1,14 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
 
+// // // Interfaces for Libraries.io API
+interface LibIoPackageInfo {
+    keywords: string[];
+}
+interface LibIoSearchResult {
+    name: string;
+}
+
 export function activate(context: vscode.ExtensionContext) {
 
 	// // Startup logging
@@ -57,18 +65,48 @@ export function activate(context: vscode.ExtensionContext) {
 			console.log(`Hover library: ${hoverLibrary}`);
 			return hoverLibrary;
 		}
+
+		const sourceOptions = [...libraries, '$(edit) Enter library name manually...'];
 		console.log('Prompting user to select a source library...');
-		return await vscode.window.showQuickPick(libraries, {
-			placeHolder: 'Select a source library to migrate *FROM*',
-		});
+		const sourceChoice = await vscode.window.showQuickPick(sourceOptions, {
+            placeHolder: 'Select a source library to migrate *FROM*',
+			title: 'Migration: Select Source'
+        });
+
+        if (sourceChoice?.includes('Enter library name manually')) {
+            return await vscode.window.showInputBox({ prompt: 'Enter the source library name' });
+        }
+        return sourceChoice;
 	}
 	// // Handle target library selection (including filtering out srcLib)
 	async function getTargetLibrary(libraries: string[], srcLib: string): Promise<string | undefined> {
 		const filteredLibraries = libraries.filter(lib => lib !== srcLib);
+		const targetOptions = [...filteredLibraries, '$(edit) Enter library name manually...'];
 		console.log('Prompting user to select a target library...');
-		return await vscode.window.showQuickPick(filteredLibraries, {
+		const targetChoice = await vscode.window.showQuickPick(targetOptions, {
 			placeHolder: 'Select a target library to migrate *TO*',
+			title: 'Migration: Select Target'
 		});
+
+		if (targetChoice?.includes('Enter library name manually')) {
+            return await vscode.window.showInputBox({ prompt: 'Enter the target library name' });
+        }
+        return targetChoice;
+	}
+	// // Alt function for getTargetLibrary
+	async function getAltTargetLibrary(srcLib: string): Promise<string | undefined> {
+		const suggestions = await getSuggestedLibraries(srcLib);
+		const targetOptions = [...suggestions, '$(edit) Enter library name manually...'];
+		console.log('Prompting user to select a target library...');
+		const targetChoice = await vscode.window.showQuickPick(targetOptions, {
+			placeHolder: 'Select a target library to migrate *TO*',
+			title: 'Migration: Select Target'
+		});
+
+		if (targetChoice?.includes('Enter library name manually')) {
+            return await vscode.window.showInputBox({ prompt: 'Enter the target library name' });
+        }
+        return targetChoice;
 	}
 	// // Parse requirements.txt to get library names
 	async function getLibrariesFromRequirements(): Promise<string[]> {
@@ -79,6 +117,48 @@ export function activate(context: vscode.ExtensionContext) {
 		const text = editor.document.getText();
 		const libraries = text.match(/[a-zA-Z0-9-_]+/g) || [];
 		return Array.from(new Set(libraries));
+	}
+	// // WIP alternative to existing target library recommendations
+	async function getSuggestedLibraries(srcLib: string): Promise<string[]> {
+		const apiKey = 'libraries-io-key';
+		if (!apiKey) {console.warn("No Libraries.io API key"); return [];}
+
+		try {
+			const libURL = `https://libraries.io/api/PyPI/${srcLib}?api_key=${apiKey}`;
+            const libResponse = await fetch(libURL);
+			if (!libResponse.ok) {
+				console.error(`Failed to retrieve information for ${srcLib}: ${libResponse.statusText}`);
+				return [];
+			}
+			const libData = await libResponse.json() as LibIoPackageInfo;
+			const keywords = libData.keywords;
+			if (!keywords || keywords.length === 0) {
+				console.log(`No keywords found for ${srcLib}`);
+				return [];
+			}
+
+			const genericKeys = new Set(['python', 'library', 'pypi', 'api', 'client', 'wrapper', 'json', 'development', 'tool']);
+			const specificKeys = keywords.filter(k => !genericKeys.has(k.toLowerCase()));
+			if (specificKeys.length === 0) {console.log("No specific keywords after filtering"); return [];}
+
+			const searchURL = `https://libraries.io/api/search?platforms=PyPI&keywords=${specificKeys.join(',')}&api_key=${apiKey}`;
+			console.log("Search URL:", searchURL);
+			const searchResponse = await fetch(searchURL);
+			if (!searchResponse.ok) {
+                console.error(`Failed to search for similar libraries: ${searchResponse.statusText}`);
+                return [];
+            }
+			const searchData = await searchResponse.json() as LibIoSearchResult[];
+			const suggestions = searchData.map((pkg: any) => pkg.name as string)
+                .filter((name: string) => name.toLowerCase() !== srcLib.toLowerCase())
+                .slice(0, 8);
+            console.log(`Suggestions for ${srcLib}:`, suggestions);
+            return suggestions;
+		} catch (error) {
+            vscode.window.showErrorMessage('Failed to fetch library suggestions from Libraries.io');
+            console.error(error);
+            return [];
+        }
 	}
 	// // Run target command in CLI
 	function runCliTool(command: string, cwd: string) {
@@ -101,14 +181,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 	// // // Register Commands
-	// // Hello World command for health check
-	const helloWorldCommand = vscode.commands.registerCommand('libmig.helloWorld', () => {
-		console.log('HelloWorld command executed');
-		vscode.window.showInformationMessage('Hello World from LibMig!');
-	});
-	context.subscriptions.push(helloWorldCommand);
-
-	// // WIP library migration
+	// // Mocked library migration
 	const migrateCommand = vscode.commands.registerCommand('libmig.migrate', async (hoverLibrary?: string) => {
 		console.log('Beginning migration...');
 		const libraries = await getLibrariesFromRequirements();
@@ -127,6 +200,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			// // Get the target library
 			const tgtLib = await getTargetLibrary(libraries, srcLib);
+			// const tgtLib = await getAltTargetLibrary(srcLib);
 			if (!tgtLib) {
 				vscode.window.showInformationMessage('Migration cancelled: No target library selected.');
 				return;
@@ -195,8 +269,8 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(backupCommand, restoreCommand);
 
-	// // Alternative Library Migration w/ Configuration
-	const altMigration = vscode.commands.registerCommand('libmig.altMigrate', () => {
+	// // Check CLI tool using '--help' flag, check config
+	const healthCheck = vscode.commands.registerCommand('libmig.healthCheck', () => {
 		const libmigFlags = [myConfig.get<boolean>('flags.forceRerun')];
 		if (libmigFlags[0] !== null) {console.log("Force rerun flag:", libmigFlags[0]);}
 		exec('libmig --help', (err, stdout, stderr) => {
@@ -210,7 +284,7 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(`Output: ${stdout}`);
 		});
 	});
-	context.subscriptions.push(altMigration);
+	context.subscriptions.push(healthCheck);
 
 	// // Testing direct CLI call
 	const migrateSpawn = vscode.commands.registerCommand('libmig.callLibMig', async () => {

@@ -19,11 +19,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "libmig.helloWorld",
-        "title": "Hello World",
-        "category": "LibMig"
-      },
-      {
         "command": "libmig.migrate",
         "title": "Migrate a Library",
         "category": "LibMig"
@@ -35,22 +30,22 @@
       },
       {
         "command": "libmig.backup",
-        "title": "Backup a file before migrating",
+        "title": "Backup a File Before Migrating",
         "category": "LibMig"
       },
       {
         "command": "libmig.restore",
-        "title": "Restore a migrated file",
+        "title": "Restore a Migrated File",
         "category": "LibMig"
       },
       {
-        "command": "libmig.altMigrate",
-        "title": "Migrate using CLI tool",
+        "command": "libmig.healthCheck",
+        "title": "Check Health of CLI Tool",
         "category": "LibMig"
       },
       {
         "command": "libmig.callLibMig",
-        "title": "Migrate using CLI tool",
+        "title": "Migrate Using CLI Tool",
         "category": "LibMig"
       }
     ],
