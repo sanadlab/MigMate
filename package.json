@@ -47,6 +47,11 @@
         "command": "libmig.callLibMig",
         "title": "Migrate Using CLI Tool",
         "category": "LibMig"
+      },
+      {
+        "command": "libmig.setApiKey",
+        "title": "Set API Keys to be stored via SecretStorage",
+        "category": "LibMig"
       }
     ],
     "configuration":[
@@ -68,6 +73,11 @@
             "type":"boolean",
             "default": false,
             "markdownDescription": "Skip running tests if they are already done. Tests are considered done if: \n\n1. No new files are migrated \n\n2. test-report.json file exists \n\n3. cov-report.json both exists"
+          },
+          "libmig.options.enableSuggestions": {
+            "type":"boolean",
+            "default": true,
+            "description": "Suggest suitable target libraries by querying Libraries.io"
           },
           "libmig.flags.maxFileCount": {
             "type":"integer",

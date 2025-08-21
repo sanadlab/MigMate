@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -52,6 +52,9 @@ class TelemetryLogger {
 }
 let telemetryLogger: TelemetryLogger;
 
+// // // Output channel for spawned process
+let libmigChannel: vscode.OutputChannel;
+
 // // // Interfaces for Libraries.io API
 interface LibIoPackageInfo {
     keywords: string[];
@@ -61,9 +64,10 @@ interface LibIoSearchResult {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-	// // Initialize temp logger
+	// // Initialize temp logger & output channel
 	telemetryLogger = new TelemetryLogger(context);
 	await telemetryLogger.initialize();
+	libmigChannel = vscode.window.createOutputChannel('LibMig');
 
 	// // Startup logging
 	console.log('Congratulations, your extension "LibMig" is now active!');
@@ -176,8 +180,29 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 	// // WIP alternative to existing target library recommendations
 	async function getSuggestedLibraries(srcLib: string): Promise<string[]> {
-		const apiKey = 'libraries-io-key';
-		if (!apiKey) {console.warn("No Libraries.io API key"); return [];}
+		const suggestionsEnabled = myConfig.get<boolean>('options.enableSuggestions');
+		if (!suggestionsEnabled) {console.warn('Target library suggestions are disabled'); return [];}
+
+		const libraryKeyID = 'libmig.librariesioApiKey';
+		let apiKey = await context.secrets.get(libraryKeyID);
+		if (!apiKey) {
+			const selection = await vscode.window.showWarningMessage(
+				'No API key is set for Libraries.io',
+				'Set API Key', 'Proceed w/o suggestions'
+			);
+
+			if (selection === 'Set API Key') {
+				await vscode.commands.executeCommand('libmig.setApiKey');
+				apiKey = await context.secrets.get(libraryKeyID);
+				if (!apiKey) {
+					console.warn("No Libraries.io API key provided");
+					return [];
+				}
+			} else {
+				console.warn("No Libraries.io API key provided - proceeding without suggestions");
+				return [];
+			}
+		}
 
 		try {
 			const libURL = `https://libraries.io/api/PyPI/${srcLib}?api_key=${apiKey}`;
@@ -198,7 +223,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (specificKeys.length === 0) {console.log("No specific keywords after filtering"); return [];}
 
 			const searchURL = `https://libraries.io/api/search?platforms=PyPI&keywords=${specificKeys.join(',')}&api_key=${apiKey}`;
-			console.log("Search URL:", searchURL);
+			console.log("Search URL:", searchURL.split('&api_key')[0]);
 			const searchResponse = await fetch(searchURL);
 			if (!searchResponse.ok) {
                 console.error(`Failed to search for similar libraries: ${searchResponse.statusText}`);
@@ -219,17 +244,33 @@ export async function activate(context: vscode.ExtensionContext) {
 	// // Run target command in CLI
 	function runCliTool(command: string, cwd: string) {
 		return new Promise<void>((resolve, reject) => {
-			exec(command, {cwd}, (err, stdout, stderr) => {
-				if (err) {
-					vscode.window.showErrorMessage(`Error: ${err.message}`);
-					reject(err);
-					return;
+			libmigChannel.show(true);
+			libmigChannel.clear();
+			libmigChannel.appendLine(`Running command: ${command}\n`);
+
+			const [cmd, ...args] = command.split(' ');
+			const child = spawn(cmd, args, { cwd, shell: true });
+
+			child.stdout.on('data', (data: Buffer) => {
+				libmigChannel.append(data.toString());
+			});
+			child.stderr.on('data', (data: Buffer) => {
+				libmigChannel.append(data.toString());
+			});
+			child.on('close', (code) => {
+				libmigChannel.appendLine(`\nCommand finished with exit code: ${code}`);
+				if (code === 0) {
+					vscode.window.showInformationMessage('LibMig process completed successfully');
+					resolve();
+				} else {
+					vscode.window.showErrorMessage(`LibMig process failed with exit code ${code}`);
+					reject(new Error(`Process failed with exit code ${code}`));
 				}
-				if (stderr) {
-					vscode.window.showWarningMessage(`Stderr: ${stderr}`);
-				}
-				vscode.window.showInformationMessage(`Output: ${stdout}`);
-				resolve();
+			});
+			child.on('error', (err) => {
+				vscode.window.showErrorMessage(`Failed with error: ${err.message}`);
+				libmigChannel.appendLine(`\nError: ${err.message}`);
+				reject(err);
 			});
 		});
 	}
@@ -256,8 +297,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			// // Get the target library
-			const tgtLib = await getTargetLibrary(libraries, srcLib);
-			// const tgtLib = await getAltTargetLibrary(srcLib);
+			// const tgtLib = await getTargetLibrary(libraries, srcLib);
+			const tgtLib = await getAltTargetLibrary(srcLib);
 			if (!tgtLib) {
 				vscode.window.showInformationMessage('Migration cancelled: No target library selected.');
 				telemetryLogger.logEvent('migrationCancelled', { reason: 'noTargetLibrary' });
@@ -380,6 +421,42 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(migrateSpawn);
+
+	// // Set API keys for libraries.io and OpenAI(?)
+	const setAPI = vscode.commands.registerCommand('libmig.setApiKey', async () => {
+		const libraryKeyID = 'libmig.librariesioApiKey';
+		const llmKeyID = 'libmig.openaiApiKey';
+
+		const services = [
+			{ label: 'Libraries.io', id: libraryKeyID, description: 'For library suggestions' },
+			{ label: 'OpenAI', id: llmKeyID, description: 'For automated migrations' }
+		];
+
+		const selectedService = await vscode.window.showQuickPick(services, {
+			placeHolder: 'Select what service the API key is for',
+			title: 'API Keys: Set API Key'
+		});
+		if (!selectedService) {return;}
+
+		const apiKey = await vscode.window.showInputBox({
+			prompt: 'Enter your API key, or use an empty string to clear it',
+			ignoreFocusOut: true,
+			password: true,
+		});
+
+		if (apiKey !== undefined) {
+			if (apiKey.length > 0) {
+				await context.secrets.store(selectedService.id, apiKey);
+				vscode.window.showInformationMessage(`API key set for: ${selectedService.label}`);
+				console.log(`Set API key for ${selectedService.label}`);
+			} else {
+				await context.secrets.delete(selectedService.id);
+				vscode.window.showInformationMessage(`API key cleared for: ${selectedService.label}`);
+				console.log(`Cleared API key for ${selectedService.label}`);
+			}
+		}
+	});
+	context.subscriptions.push(setAPI);
 }
 
 export function deactivate() {}
