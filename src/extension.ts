@@ -1,56 +1,10 @@
 import * as vscode from 'vscode';
 import { exec, spawn } from 'child_process';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { TelemetryReporter } from '@vscode/extension-telemetry';
 
-// // // Custom logger for telemetry (temp)
-class TelemetryLogger {
-	storagePath: string;
-	logFilePath: string;
-	isInitialized = false;
-
-	constructor(context: vscode.ExtensionContext) {
-		this.storagePath = context.globalStorageUri.fsPath;
-		this.logFilePath = path.join(this.storagePath, 'telemetry-log.jsonl');
-	}
-
-	async initialize(): Promise<void> {
-		try {
-			await fs.mkdir(this.storagePath, {recursive: true});
-			this.isInitialized = true;
-			console.log('Log file:', this.logFilePath);
-		} catch (error) {
-			console.error('Failed to initialize telemetry logger');
-		}
-	}
-
-	async logEvent(eventName: string, properties?: { [key: string]: string }): Promise<void> {
-		const isTelemetryEnabled = vscode.workspace.getConfiguration('telemetry').get<boolean>('enableTelemetry');
-		if (!isTelemetryEnabled) {
-			console.warn('Telemetry is disabled in VSCode settings');
-			return;
-		}
-
-		if (!this.isInitialized) {
-			console.warn('Telemetry logger not initialized');
-			return;
-		}
-
-		const event = {
-			// machineID: vscode.env.machineId,
-			timeStamp: new Date().toISOString(),
-			name: eventName,
-			properties: properties || {},
-		};
-
-		try {
-			await fs.appendFile(this.logFilePath, JSON.stringify(event) + '\n');
-		} catch (error) {
-			console.error(`Failed to write event to log file:`, error);
-		}
-	}
-}
-let telemetryLogger: TelemetryLogger;
+// // // VS Code Telemetry Setup
+const connectionString = 'InstrumentationKey';
+let reporter: TelemetryReporter | undefined;
 
 // // // Output channel for spawned process
 let libmigChannel: vscode.OutputChannel;
@@ -63,17 +17,17 @@ interface LibIoSearchResult {
     name: string;
 }
 
-export async function activate(context: vscode.ExtensionContext) {
-	// // Initialize temp logger & output channel
-	telemetryLogger = new TelemetryLogger(context);
-	await telemetryLogger.initialize();
+export function activate(context: vscode.ExtensionContext) {
+	// // Initialize real telemetry
+	reporter = new TelemetryReporter(connectionString);
+	context.subscriptions.push(reporter);
 	libmigChannel = vscode.window.createOutputChannel('LibMig');
 
 	// // Startup logging
 	console.log('Congratulations, your extension "LibMig" is now active!');
 	const activeEditor = vscode.window.activeTextEditor;
 	console.log('Language trigger:', activeEditor?.document.languageId);
-	telemetryLogger.logEvent('pluginActivation', { trigger: `language=${activeEditor?.document.languageId}` });
+	reporter?.sendTelemetryEvent('pluginActivation', { trigger: `language=${activeEditor?.document.languageId}` });
 
 
 
@@ -83,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	vscode.workspace.onDidChangeConfiguration(event => {
 		if (event.affectsConfiguration('libmig')) {
 			console.log("Update LibMig configuration");
-			telemetryLogger.logEvent('configChanged');
+			reporter?.sendTelemetryEvent('configChanged');
 			myConfig = vscode.workspace.getConfiguration('libmig');
 		}
 	});
@@ -281,7 +235,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// // Mocked library migration
 	const migrateCommand = vscode.commands.registerCommand('libmig.migrate', async (hoverLibrary?: string) => {
 		console.log('Beginning migration...');
-		telemetryLogger.logEvent('migrationStarted', { trigger: hoverLibrary ? 'hover' : 'commandPalette' });
+		reporter?.sendTelemetryEvent('migrationStarted', { trigger: hoverLibrary ? 'hover' : 'commandPalette' });
 		const libraries = await getLibrariesFromRequirements();
 
 		if (libraries.length <= 0) {
@@ -301,13 +255,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			const tgtLib = await getAltTargetLibrary(srcLib);
 			if (!tgtLib) {
 				vscode.window.showInformationMessage('Migration cancelled: No target library selected.');
-				telemetryLogger.logEvent('migrationCancelled', { reason: 'noTargetLibrary' });
+				reporter?.sendTelemetryEvent('migrationCancelled', { reason: 'noTargetLibrary' });
 				return;
 			}
 			// Perform the migration
 			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'.`);
 			console.log(`Migration initiated from '${srcLib}' to '${tgtLib}'`);
-			telemetryLogger.logEvent('migrationCompleted', { source: srcLib, target: tgtLib });
+			reporter?.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
 		} catch (error) {
 			vscode.window.showErrorMessage('An error occurred during migration.');
 			console.error('Migration error:', error);
@@ -388,7 +342,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// // Testing direct CLI call
 	const migrateSpawn = vscode.commands.registerCommand('libmig.callLibMig', async () => {
-		telemetryLogger.logEvent('migrationStarted', { trigger: 'cliCommand' });
+		reporter?.sendTelemetryEvent('migrationStarted', { trigger: 'cliCommand' });
 
 		// // Run from open directory instead of VS Code installation path
 		const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -413,11 +367,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (forceRerun) { command += ' --force-rerun'; }
 			vscode.window.showInformationMessage('Starting migration...');
 			await runCliTool(command, cwd);
-			telemetryLogger.logEvent('migrationCompleted', { source: sourceLib, target: targetLib });
+			reporter?.sendTelemetryEvent('migrationCompleted', { source: sourceLib, target: targetLib });
 		} else {
 			vscode.window.showErrorMessage('Migration cancelled: Missing required inputs.');
 			console.error(`sourceLib=${sourceLib}, targetLib=${targetLib}, pythonVer=${pythonVersion}`);
-			telemetryLogger.logEvent('migrationCancelled', { reason: 'missingInputs' });
+			reporter?.sendTelemetryEvent('migrationCancelled', { reason: 'missingInputs' });
 		}
 	});
 	context.subscriptions.push(migrateSpawn);
