@@ -3,7 +3,7 @@ import { exec, spawn } from 'child_process';
 import { TelemetryReporter } from '@vscode/extension-telemetry';
 
 // // // VS Code Telemetry Setup
-const connectionString = 'InstrumentationKey';
+const connectionString = 'InstrumentationKey=42acdffc-3ef3-4cf0-9542-b288f124283b;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/;LiveEndpoint=https://westus2.livediagnostics.monitor.azure.com/;ApplicationId=396883d1-1f45-43f7-8db2-fe39284e88a8';
 let reporter: TelemetryReporter | undefined;
 
 // // // Output channel for spawned process
@@ -18,10 +18,11 @@ interface LibIoSearchResult {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	// // Initialize real telemetry
+	// // // Initialize telemetry & output channel
 	reporter = new TelemetryReporter(connectionString);
-	context.subscriptions.push(reporter);
 	libmigChannel = vscode.window.createOutputChannel('LibMig');
+	context.subscriptions.push(reporter);
+	context.subscriptions.push(libmigChannel);
 
 	// // Startup logging
 	console.log('Congratulations, your extension "LibMig" is now active!');
@@ -92,23 +93,14 @@ export function activate(context: vscode.ExtensionContext) {
         }
         return sourceChoice;
 	}
-	// // Handle target library selection (including filtering out srcLib)
-	async function getTargetLibrary(libraries: string[], srcLib: string): Promise<string | undefined> {
-		const filteredLibraries = libraries.filter(lib => lib !== srcLib);
-		const targetOptions = [...filteredLibraries, '$(edit) Enter library name manually...'];
-		console.log('Prompting user to select a target library...');
-		const targetChoice = await vscode.window.showQuickPick(targetOptions, {
-			placeHolder: 'Select a target library to migrate *TO*',
-			title: 'Migration: Select Target'
-		});
+	// // Handle target library selection
+	async function getTargetLibrary(srcLib: string): Promise<string | undefined> {
+		const suggestionsEnabled = myConfig.get<boolean>('options.enableSuggestions');
+		if (!suggestionsEnabled) {
+			console.warn('Target library suggestions are disabled');
+			return await vscode.window.showInputBox({ prompt: 'Enter the target library name' });
+		}
 
-		if (targetChoice?.includes('Enter library name manually')) {
-            return await vscode.window.showInputBox({ prompt: 'Enter the target library name' });
-        }
-        return targetChoice;
-	}
-	// // Alt function for getTargetLibrary
-	async function getAltTargetLibrary(srcLib: string): Promise<string | undefined> {
 		const suggestions = await getSuggestedLibraries(srcLib);
 		const targetOptions = [...suggestions, '$(edit) Enter library name manually...'];
 		console.log('Prompting user to select a target library...');
@@ -232,38 +224,59 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 	// // // Register Commands
-	// // Mocked library migration
+	// // Perform a library migration
 	const migrateCommand = vscode.commands.registerCommand('libmig.migrate', async (hoverLibrary?: string) => {
 		console.log('Beginning migration...');
-		reporter?.sendTelemetryEvent('migrationStarted', { trigger: hoverLibrary ? 'hover' : 'commandPalette' });
-		const libraries = await getLibrariesFromRequirements();
-
-		if (libraries.length <= 0) {
-			vscode.window.showErrorMessage('No libraries found in requirements file.');
-			return;
-		}
+		reporter?.sendTelemetryEvent('migrationStarted', { trigger: hoverLibrary ? 'hover' : 'commandPalette' }); // check this for context menu
 
 		try {
-			// // Get the source library
+			// // Run from open directory instead of VS Code installation path
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders || workspaceFolders.length === 0) {
+				vscode.window.showErrorMessage('No workspace folder is open. Please open a project to run this command.');
+				return;
+			}
+			const cwd = workspaceFolders[0].uri.fsPath;
+			console.log("Directory:", cwd);
+
+			// // Read requirements file to produce a list of source libraries
+			const libraries = await getLibrariesFromRequirements();
+			if (libraries.length <= 0) {
+				vscode.window.showErrorMessage('No libraries found in requirements file.');
+				return;
+			}
+
+			// // Get the source & target libraries
 			const srcLib = await getSourceLibrary(hoverLibrary, libraries);
 			if (!srcLib) {
 				vscode.window.showInformationMessage('Migration cancelled: No source library selected.');
+				reporter?.sendTelemetryEvent('migrationCancelled', { reason: 'noSourceLibrary' });
 				return;
 			}
-			// // Get the target library
-			// const tgtLib = await getTargetLibrary(libraries, srcLib);
-			const tgtLib = await getAltTargetLibrary(srcLib);
+			const tgtLib = await getTargetLibrary(srcLib);
 			if (!tgtLib) {
 				vscode.window.showInformationMessage('Migration cancelled: No target library selected.');
 				reporter?.sendTelemetryEvent('migrationCancelled', { reason: 'noTargetLibrary' });
 				return;
 			}
-			// Perform the migration
-			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'.`);
+
+			// // Set LibMig flags based on config
+			const pythonVersion = myConfig.get<string>('flags.pythonVersion');
+			const forceRerun = myConfig.get<boolean>('flags.forceRerun');
+
+			// // Construct CLI command using flags
+			let command = `libmig ${srcLib} ${tgtLib}`;
+			if (pythonVersion) { command += ` --python-version=${pythonVersion}`; }	
+			if (forceRerun) { command += ' --force-rerun'; }
+
+			// // Perform the migration
+			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'...`);
 			console.log(`Migration initiated from '${srcLib}' to '${tgtLib}'`);
-			reporter?.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
+			await runCliTool(command, cwd);
+			reporter?.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, version: pythonVersion });
 		} catch (error) {
 			vscode.window.showErrorMessage('An error occurred during migration.');
+			reporter?.sendTelemetryErrorEvent('migrationError', { error: (error as Error).message });
 			console.error('Migration error:', error);
 		}
 	});
@@ -339,42 +352,6 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 	});
 	context.subscriptions.push(healthCheck);
-
-	// // Testing direct CLI call
-	const migrateSpawn = vscode.commands.registerCommand('libmig.callLibMig', async () => {
-		reporter?.sendTelemetryEvent('migrationStarted', { trigger: 'cliCommand' });
-
-		// // Run from open directory instead of VS Code installation path
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage('No workspace folder is open. Please open a project to run this command.');
-            return;
-        }
-        const cwd = workspaceFolders[0].uri.fsPath;
-		console.log("Directory:", cwd);
-
-		// // Take input for user arguments
-		const sourceLib = await vscode.window.showInputBox({ prompt: 'Enter the source library' });
-		const targetLib = await vscode.window.showInputBox({ prompt: 'Enter the target library' });
-
-		// // Set flags based on config (WIP)
-		const pythonVersion = myConfig.get<string>('flags.pythonVersion');
-		const forceRerun = myConfig.get<boolean>('flags.forceRerun');
-
-		if (sourceLib && targetLib && pythonVersion) {
-			let command = `libmig ${sourceLib} ${targetLib} --python-version=${pythonVersion}`;
-			// // Add additional args to command if needed
-			if (forceRerun) { command += ' --force-rerun'; }
-			vscode.window.showInformationMessage('Starting migration...');
-			await runCliTool(command, cwd);
-			reporter?.sendTelemetryEvent('migrationCompleted', { source: sourceLib, target: targetLib });
-		} else {
-			vscode.window.showErrorMessage('Migration cancelled: Missing required inputs.');
-			console.error(`sourceLib=${sourceLib}, targetLib=${targetLib}, pythonVer=${pythonVersion}`);
-			reporter?.sendTelemetryEvent('migrationCancelled', { reason: 'missingInputs' });
-		}
-	});
-	context.subscriptions.push(migrateSpawn);
 
 	// // Set API keys for libraries.io and OpenAI(?)
 	const setAPI = vscode.commands.registerCommand('libmig.setApiKey', async () => {

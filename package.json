@@ -13,7 +13,8 @@
   "activationEvents": [
     "onLanguage:python",
     "onLanguage:pip-requirements",
-    "workspaceContains:requirements.txt"
+    "workspaceContains:**/requirements*.txt",
+    "workspaceContains:pyproject.toml"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -44,11 +45,6 @@
         "category": "LibMig"
       },
       {
-        "command": "libmig.callLibMig",
-        "title": "Migrate Using CLI Tool",
-        "category": "LibMig"
-      },
-      {
         "command": "libmig.setApiKey",
         "title": "Set API Keys to be Stored",
         "category": "LibMig"
@@ -74,7 +70,7 @@
             "default": false,
             "markdownDescription": "Skip running tests if they are already done. Tests are considered done if: \n\n1. No new files are migrated \n\n2. test-report.json file exists \n\n3. cov-report.json both exists"
           },
-          "libmig.options.enableSuggestions": {
+          "libmig.options.enableSuggestions.(Experimental)": {
             "type": "boolean",
             "default": true,
             "description": "Suggest suitable target libraries by querying Libraries.io"
