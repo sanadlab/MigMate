@@ -2,6 +2,11 @@ import * as vscode from 'vscode';
 import { exec, spawn } from 'child_process';
 import { TelemetryReporter } from '@vscode/extension-telemetry';
 
+import { migrationState, MigrationChange } from './migrationState';
+import { InlineDiffProvider } from './inlineDiffProvider';
+
+
+
 // // // VS Code Telemetry Setup
 const connectionString = 'InstrumentationKey=42acdffc-3ef3-4cf0-9542-b288f124283b;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/;LiveEndpoint=https://westus2.livediagnostics.monitor.azure.com/;ApplicationId=396883d1-1f45-43f7-8db2-fe39284e88a8';
 let reporter: TelemetryReporter | undefined;
@@ -69,7 +74,14 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}
 	);
-	context.subscriptions.push(hoverProvider);
+	const inlineDiffProvider = new InlineDiffProvider();
+	const updatedContentProvider = vscode.workspace.registerTextDocumentContentProvider('libmig-migrated', {
+		provideTextDocumentContent: uri => {
+			const originalUri = vscode.Uri.file(uri.path);
+			return migrationState.getChange(originalUri)?.updatedContent;
+		}
+	});
+	context.subscriptions.push(hoverProvider, updatedContentProvider);
 
 
 
@@ -80,6 +92,10 @@ export function activate(context: vscode.ExtensionContext) {
 			console.log(`Hover library: ${hoverLibrary}`);
 			return hoverLibrary;
 		}
+
+		if (libraries.length <= 0) {
+            return await vscode.window.showInputBox({ prompt: 'Enter the source library name' });
+        }
 
 		const sourceOptions = [...libraries, '$(edit) Enter library name manually...'];
 		console.log('Prompting user to select a source library...');
@@ -95,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 	// // Handle target library selection
 	async function getTargetLibrary(srcLib: string): Promise<string | undefined> {
-		const suggestionsEnabled = myConfig.get<boolean>('options.enableSuggestions');
+		const suggestionsEnabled = myConfig.get<boolean>('options.enableSuggestions.(Experimental)');
 		if (!suggestionsEnabled) {
 			console.warn('Target library suggestions are disabled');
 			return await vscode.window.showInputBox({ prompt: 'Enter the target library name' });
@@ -242,8 +258,7 @@ export function activate(context: vscode.ExtensionContext) {
 			// // Read requirements file to produce a list of source libraries
 			const libraries = await getLibrariesFromRequirements();
 			if (libraries.length <= 0) {
-				vscode.window.showErrorMessage('No libraries found in requirements file.');
-				return;
+				vscode.window.showWarningMessage('No libraries found in requirements file.');
 			}
 
 			// // Get the source & target libraries
@@ -266,14 +281,53 @@ export function activate(context: vscode.ExtensionContext) {
 
 			// // Construct CLI command using flags
 			let command = `libmig ${srcLib} ${tgtLib}`;
-			if (pythonVersion) { command += ` --python-version=${pythonVersion}`; }	
+			if (pythonVersion) { command += ` --python-version=${pythonVersion}`; }
 			if (forceRerun) { command += ' --force-rerun'; }
 
 			// // Perform the migration
 			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'...`);
 			console.log(`Migration initiated from '${srcLib}' to '${tgtLib}'`);
-			await runCliTool(command, cwd);
+			await runCliTool('libmig --help', cwd);
 			reporter?.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, version: pythonVersion });
+
+			// // Launch Preview (check this w/ CLI tool response)
+			const editor = vscode.window.activeTextEditor;
+			if (!editor) {return;}
+			const mockChanges: MigrationChange[] = [{
+				uri: editor.document.uri,
+				originalContent: editor.document.getText(),
+				updatedContent: editor.document.getText().replace(new RegExp(srcLib, 'g'), tgtLib)
+			}];
+			migrationState.loadChanges(mockChanges);
+			const previewMode = myConfig.get<string>('flags.previewGrouping');
+			console.log("Preview mode:", previewMode);
+			if (previewMode === 'All at once') {
+				// log grouped preview
+				const edit = new vscode.WorkspaceEdit();
+				const changes = migrationState.getChanges();
+				if (changes.length === 0) {
+					vscode.window.showInformationMessage('No changes made during migration');
+				}
+				for (const change of changes) {
+					const fullRange = new vscode.Range(0, 0, Number.MAX_VALUE, Number.MAX_VALUE);
+					const metadata: vscode.WorkspaceEditEntryMetadata = {
+						label: `Migrate ${srcLib} to ${tgtLib}`,
+						description: `Full file migration for ${vscode.workspace.asRelativePath(change.uri)}`,
+						needsConfirmation: true,
+					};
+					edit.replace(change.uri, fullRange, change.updatedContent, metadata);
+				}
+				await vscode.workspace.applyEdit(edit, { isRefactoring: true });
+				migrationState.clear();
+			}
+			else {
+				// log individual preview
+				vscode.window.visibleTextEditors.forEach(editor => {
+					if (migrationState.getChange(editor.document.uri)) {
+						inlineDiffProvider.showDecorations(editor);
+					}
+				});
+			}
 		} catch (error) {
 			vscode.window.showErrorMessage('An error occurred during migration.');
 			reporter?.sendTelemetryErrorEvent('migrationError', { error: (error as Error).message });
@@ -303,12 +357,23 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 		context.subscriptions.push(originalProvider, updatedProvider);
 
-		await vscode.commands.executeCommand(
-			'vscode.diff',
-			originalUri,
-			updatedUri,
-			'Migration Preview: Split Diff'
-		);
+		// await vscode.commands.executeCommand(
+		// 	'vscode.diff',
+		// 	originalUri,
+		// 	updatedUri,
+		// 	'Migration Preview: Split Diff'
+		// );
+
+
+
+		const edit = new vscode.WorkspaceEdit();
+		const metadata: vscode.WorkspaceEditEntryMetadata = {
+			label: 'Migrate requests --> httpx',
+			description: 'Replace imports',
+			needsConfirmation: true,
+		};
+		edit.replace(originalUri, new vscode.Range(0, 0, 0, 0), 'import httpx', metadata);
+		await vscode.workspace.applyEdit(edit, { isRefactoring: true });
 	});
 	context.subscriptions.push(viewDiffCommand);
 
