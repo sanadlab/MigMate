@@ -3,10 +3,10 @@ import * as diff from 'diff';
 import { migrationState } from '../services/migrationState';
 
 export class InlineDiffProvider {
-    private addedDecoration = vscode.window.createTextEditorDecorationType({
-        backgroundColor: 'rgba(0, 255, 0, 0.25)',
-        isWholeLine: true,
-    });
+    // private addedDecoration = vscode.window.createTextEditorDecorationType({
+    //     backgroundColor: 'rgba(0, 255, 0, 0.25)',
+    //     isWholeLine: true,
+    // });
     private removedDecoration = vscode.window.createTextEditorDecorationType({
         backgroundColor: 'rgba(255, 0, 0, 0.25)',
         isWholeLine: true,
@@ -34,11 +34,10 @@ export class InlineDiffProvider {
         });
 
         editor.setDecorations(this.removedDecoration, removedRanges);
-        // need to add CodeLensProvider to include addedDecoration
     }
 
     public clearDecorations(editor: vscode.TextEditor) {
-        editor.setDecorations(this.addedDecoration, []);
+        // editor.setDecorations(this.addedDecoration, []);
         editor.setDecorations(this.removedDecoration, []);
     }
 }

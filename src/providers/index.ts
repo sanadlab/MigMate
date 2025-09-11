@@ -6,17 +6,7 @@ import { CodeLensProvider } from './codeLensProvider';
 
 
 export { InlineDiffProvider } from './inlineDiffProvider';
-
-
-let _codeLensProvider: CodeLensProvider | undefined;
-export function getCodeLensProvider(): CodeLensProvider {
-    if (!_codeLensProvider) {
-        _codeLensProvider = new CodeLensProvider();
-        console.log("CodeLensProvider created:", _codeLensProvider);
-    }
-    return _codeLensProvider;
-}
-
+export const codeLensProvider = new CodeLensProvider();
 
 export function registerProviders(context: vscode.ExtensionContext) {
     registerHoverProvider(context);
@@ -24,7 +14,7 @@ export function registerProviders(context: vscode.ExtensionContext) {
 
     const codeLensProviderRegistration = vscode.languages.registerCodeLensProvider(
         { scheme: 'file' },
-        getCodeLensProvider()
+        codeLensProvider
     );
     context.subscriptions.push(codeLensProviderRegistration);
 }

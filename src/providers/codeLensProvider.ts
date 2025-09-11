@@ -14,21 +14,14 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
         if (hunks.length === 0) {return [];}
 
         const codeLenses: vscode.CodeLens[] = [];
-        for (const hunk of hunks) {
-            if (hunk.status !== 'pending') {continue;}
 
+        const sortedHunks = [...hunks].sort((a, b) => a.originalStartLine - b.originalStartLine);
+        for (const hunk of sortedHunks) {
+            if (hunk.status !== 'pending') {continue;}
             const startLine = hunk.originalStartLine;
             const range = new vscode.Range(startLine, 0, startLine, 0);
 
-            if (hunk.type === 'added') {
-                const addedCodeTitle = hunk.lines.map(line => `+ ${line}`).join('\n');
-                const addedCodeLens = new vscode.CodeLens(range, {
-                    title: addedCodeTitle,
-                    command: ''
-                });
-                codeLenses.push(addedCodeLens);
-            }
-
+            // // Not registered for end user
             const acceptCommand: vscode.Command = {
                 title: 'Accept',
                 command: 'libmig.acceptHunk',
@@ -39,8 +32,41 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
                 command: 'libmig.rejectHunk',
                 arguments: [document.uri, hunk.id]
             };
-            codeLenses.push(new vscode.CodeLens(range, acceptCommand));
-            codeLenses.push(new vscode.CodeLens(range, rejectCommand));
+
+            if (hunk.type === 'added') {
+                // for (let i = 0; i < hunk.lines.length; i++) {
+                //     const line = hunk.lines[i];
+                //     const textRange = new vscode.Range(startLine + i, 0, startLine + i, 0);
+                //     codeLenses.push(new vscode.CodeLens(textRange, {
+                //         title: `+ ${line}`,
+                //         command: ''
+                //     }));
+                // }
+                // const buttonRange = new vscode.Range(startLine + hunk.lines.length - 1, 0, startLine + hunk.lines.length - 1, 0);
+                // codeLenses.push(new vscode.CodeLens(buttonRange, acceptCommand));
+                // codeLenses.push(new vscode.CodeLens(buttonRange, rejectCommand));
+
+                const addedCode = hunk.lines.map(line => `+ ${line}`).join('\n');
+                const addedCodeLens = new vscode.CodeLens(
+                    new vscode.Range(startLine, 0, startLine, 0),
+                    { title: addedCode, command: '' }
+                );
+                codeLenses.push(addedCodeLens);
+
+                // Add buttons after the code block
+                codeLenses.push(new vscode.CodeLens(
+                    new vscode.Range(startLine, 0, startLine, 0),
+                    acceptCommand
+                ));
+                codeLenses.push(new vscode.CodeLens(
+                    new vscode.Range(startLine, 0, startLine, 0),
+                    rejectCommand
+                ));
+            }
+            else if (hunk.type === 'removed') {
+                codeLenses.push(new vscode.CodeLens(range, acceptCommand));
+                codeLenses.push(new vscode.CodeLens(range, rejectCommand));
+            }
         }
 
         return codeLenses;

@@ -5,7 +5,7 @@ import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from
 import { runCliTool } from './services/cli';
 import { exec } from 'child_process';
 import { telemetryService } from './services/telemetry';
-import { getCodeLensProvider, InlineDiffProvider } from './providers';
+import { codeLensProvider, InlineDiffProvider } from './providers';
 
 
 
@@ -103,8 +103,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 						inlineDiffProvider.showDecorations(editor);
 					}
 				});
-				// console.log("Before refresh(), codeLensProvider =", getCodeLensProvider());
-				getCodeLensProvider().refresh();
+				codeLensProvider.refresh();
 			}
 		} catch (error) {
 			vscode.window.showErrorMessage('An error occurred during migration.');
@@ -122,7 +121,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		hunk.status = 'accepted';
 		// workspace edit
 		inlineDiffProvider.showDecorations(vscode.window.activeTextEditor!);
-		getCodeLensProvider().refresh();
+		codeLensProvider.refresh();
 	});
 	const rejectHunkCommand = vscode.commands.registerCommand('libmig.rejectHunk', async (uri: vscode.Uri, hunkId: number) => {
 		const hunk = migrationState.getHunks(uri).find(h => h.id === hunkId);
@@ -130,7 +129,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		hunk.status = 'rejected';
 		// workspace edit
 		inlineDiffProvider.showDecorations(vscode.window.activeTextEditor!);
-		getCodeLensProvider().refresh();
+		codeLensProvider.refresh();
 	});
 
 
