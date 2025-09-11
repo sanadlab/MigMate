@@ -4,11 +4,11 @@ import { migrationState } from '../services/migrationState';
 
 export class InlineDiffProvider {
     private addedDecoration = vscode.window.createTextEditorDecorationType({
-        backgroundColor: 'rgba(0, 255, 0, 0.1)',
+        backgroundColor: 'rgba(0, 255, 0, 0.25)',
         isWholeLine: true,
     });
     private removedDecoration = vscode.window.createTextEditorDecorationType({
-        backgroundColor: 'rgba(255, 0, 0, 0.1)',
+        backgroundColor: 'rgba(255, 0, 0, 0.25)',
         isWholeLine: true,
     });
 

@@ -15,13 +15,13 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(reporter);
 
 	// // Initialize services
+	contextService.initialize(context);
 	telemetryService.initialize(reporter);
 	configService.initialize(context);
-	contextService.initialize(context);
 
 	// // Register commands and providers
-	registerCommands(context);
 	registerProviders(context);
+	registerCommands(context);
 
 	// // Startup logging
 	console.log('Congratulations, your extension "LibMig" is now active!');

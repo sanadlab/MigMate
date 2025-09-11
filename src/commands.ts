@@ -1,17 +1,18 @@
 import * as vscode from 'vscode';
-import { TelemetryReporter } from '@vscode/extension-telemetry';
 import { migrationState, MigrationChange } from './services/migrationState';
-import { InlineDiffProvider } from './providers/inlineDiffProvider';
 import { configService } from './services/config';
 import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from './services/librariesApi';
 import { runCliTool } from './services/cli';
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { telemetryService } from './services/telemetry';
+import { getCodeLensProvider, InlineDiffProvider } from './providers';
 
 
 
 export function registerCommands(context: vscode.ExtensionContext) {
     const inlineDiffProvider = new InlineDiffProvider();
+
+
 
 	// // Perform a library migration
 	const migrateCommand = vscode.commands.registerCommand('libmig.migrate', async (hoverLibrary?: string) => {
@@ -69,13 +70,15 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			const mockChanges: MigrationChange[] = [{
 				uri: editor.document.uri,
 				originalContent: editor.document.getText(),
-				updatedContent: editor.document.getText().replace(new RegExp(srcLib, 'g'), tgtLib)
+				updatedContent: editor.document.getText().replace(new RegExp(srcLib, 'g'), tgtLib),
+				hunks: [] // check this
 			}];
 			migrationState.loadChanges(mockChanges);
+
 			const previewMode = configService.get<string>('flags.previewGrouping');
 			console.log("Preview mode:", previewMode);
 			if (previewMode === 'All at once') {
-				// log grouped preview
+				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'grouped' });
 				const edit = new vscode.WorkspaceEdit();
 				const changes = migrationState.getChanges();
 				if (changes.length === 0) {
@@ -94,12 +97,14 @@ export function registerCommands(context: vscode.ExtensionContext) {
 				migrationState.clear();
 			}
 			else {
-				// log individual preview
+				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'inline' });
 				vscode.window.visibleTextEditors.forEach(editor => {
 					if (migrationState.getChange(editor.document.uri)) {
 						inlineDiffProvider.showDecorations(editor);
 					}
 				});
+				// console.log("Before refresh(), codeLensProvider =", getCodeLensProvider());
+				getCodeLensProvider().refresh();
 			}
 		} catch (error) {
 			vscode.window.showErrorMessage('An error occurred during migration.');
@@ -107,6 +112,28 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			console.error('Migration error:', error);
 		}
 	});
+
+
+
+	// // Hunk commands for preview
+	const acceptHunkCommand = vscode.commands.registerCommand('libmig.acceptHunk', async (uri: vscode.Uri, hunkId: number) => {
+		const hunk = migrationState.getHunks(uri).find(h => h.id === hunkId);
+		if (!hunk || hunk.status !== 'pending') {return;}
+		hunk.status = 'accepted';
+		// workspace edit
+		inlineDiffProvider.showDecorations(vscode.window.activeTextEditor!);
+		getCodeLensProvider().refresh();
+	});
+	const rejectHunkCommand = vscode.commands.registerCommand('libmig.rejectHunk', async (uri: vscode.Uri, hunkId: number) => {
+		const hunk = migrationState.getHunks(uri).find(h => h.id === hunkId);
+		if (!hunk || hunk.status !== 'pending') {return;}
+		hunk.status = 'rejected';
+		// workspace edit
+		inlineDiffProvider.showDecorations(vscode.window.activeTextEditor!);
+		getCodeLensProvider().refresh();
+	});
+
+
 
 	// // WIP diff view
 	const viewDiffCommand = vscode.commands.registerCommand('libmig.viewDiff', async () => {
@@ -129,23 +156,15 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		});
 		context.subscriptions.push(originalProvider, updatedProvider);
 
-		// await vscode.commands.executeCommand(
-		// 	'vscode.diff',
-		// 	originalUri,
-		// 	updatedUri,
-		// 	'Migration Preview: Split Diff'
-		// );
-
-
-		const edit = new vscode.WorkspaceEdit();
-		const metadata: vscode.WorkspaceEditEntryMetadata = {
-			label: 'Migrate requests --> httpx',
-			description: 'Replace imports',
-			needsConfirmation: true,
-		};
-		edit.replace(originalUri, new vscode.Range(0, 0, 0, 0), 'import httpx', metadata);
-		await vscode.workspace.applyEdit(edit, { isRefactoring: true });
+		await vscode.commands.executeCommand(
+			'vscode.diff',
+			originalUri,
+			updatedUri,
+			'Migration Preview: Split Diff'
+		);
 	});
+
+
 
 	// // WIP file backup and restore (look into alternate methods)
 	let backupContent: string | undefined;
@@ -170,6 +189,8 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		}
 	});
 
+
+
 	// // Check CLI tool using '--help' flag, check config
 	const healthCheck = vscode.commands.registerCommand('libmig.healthCheck', () => {
 		const libmigFlags = [configService.get<boolean>('flags.forceRerun')];
@@ -185,6 +206,8 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(`Output: ${stdout}`);
 		});
 	});
+
+
 
 	// // Set API keys for libraries.io and OpenAI(?)
 	const setAPI = vscode.commands.registerCommand('libmig.setApiKey', async () => {
@@ -223,5 +246,5 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	context.subscriptions.push(migrateCommand, viewDiffCommand, backupCommand, restoreCommand, healthCheck, setAPI);
+	context.subscriptions.push(migrateCommand, acceptHunkCommand, rejectHunkCommand, viewDiffCommand, backupCommand, restoreCommand, healthCheck, setAPI);
 }
