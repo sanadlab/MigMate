@@ -35,33 +35,17 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
 
             if (hunk.type === 'added') {
                 // for (let i = 0; i < hunk.lines.length; i++) {
-                //     const line = hunk.lines[i];
-                //     const textRange = new vscode.Range(startLine + i, 0, startLine + i, 0);
-                //     codeLenses.push(new vscode.CodeLens(textRange, {
-                //         title: `+ ${line}`,
-                //         command: ''
-                //     }));
+                    // const line = hunk.lines[i];
+                    const addedCodeTitle = hunk.lines.map(line => `+ ${line}`).join('\n'); // check this
+                    codeLenses.push(new vscode.CodeLens(range, {
+                        title: addedCodeTitle,
+                        // title: `+ ${line}`,
+                        command: ''
+                    }));
+                //     console.log(i);
                 // }
-                // const buttonRange = new vscode.Range(startLine + hunk.lines.length - 1, 0, startLine + hunk.lines.length - 1, 0);
-                // codeLenses.push(new vscode.CodeLens(buttonRange, acceptCommand));
-                // codeLenses.push(new vscode.CodeLens(buttonRange, rejectCommand));
-
-                const addedCode = hunk.lines.map(line => `+ ${line}`).join('\n');
-                const addedCodeLens = new vscode.CodeLens(
-                    new vscode.Range(startLine, 0, startLine, 0),
-                    { title: addedCode, command: '' }
-                );
-                codeLenses.push(addedCodeLens);
-
-                // Add buttons after the code block
-                codeLenses.push(new vscode.CodeLens(
-                    new vscode.Range(startLine, 0, startLine, 0),
-                    acceptCommand
-                ));
-                codeLenses.push(new vscode.CodeLens(
-                    new vscode.Range(startLine, 0, startLine, 0),
-                    rejectCommand
-                ));
+                codeLenses.push(new vscode.CodeLens(range, acceptCommand));
+                codeLenses.push(new vscode.CodeLens(range, rejectCommand));
             }
             else if (hunk.type === 'removed') {
                 codeLenses.push(new vscode.CodeLens(range, acceptCommand));

@@ -28,7 +28,7 @@ class MigrationStateService {
     }
 
     private parseDiff(original: string, updated: string): DiffHunk[] {
-        const diffResult = diff.diffLines(original, updated, { newlineIsToken: true });
+        const diffResult = diff.diffLines(original, updated, { newlineIsToken: false });
         const hunks: DiffHunk[] = [];
         let currentLine = 0;
         let hunkId = 0;
@@ -36,7 +36,6 @@ class MigrationStateService {
         diffResult.forEach(part => {
             const lines = part.value.endsWith('\n') ? part.value.slice(0, -1).split('\n') : [part.value];
             const lineCount = lines.length;
-
             if (part.added) {
                 hunks.push({ id: hunkId++, type: 'added', lines, originalStartLine: currentLine, status: 'pending' });
             } else if (part.removed) {

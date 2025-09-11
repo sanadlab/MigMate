@@ -64,14 +64,25 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			await runCliTool('libmig --help', cwd); // command
 			telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
 
-			// // Launch Preview (check this w/ CLI tool response)
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {return;}
-			const mockChanges: MigrationChange[] = [{
+
+			// const mockChanges = [{
+			// 	uri: editor.document.uri,
+			// 	originalContent: editor.document.getText(),
+			// 	updatedContent: editor.document.getText().replace(new RegExp(srcLib, 'g'), tgtLib),
+			// }];
+			const originalContent = editor.document.getText();
+			let updatedContent = originalContent;
+			updatedContent = updatedContent.replace("import requests", "import httpx");
+			const multiOriginal = `    resp = requests.get(\n        "https://api.example.com/data",\n        params={"q": "test", "limit": 5}\n    )`;
+			const multiUpdated = `    resp = httpx.get(\n        "https://api.example.com/data2",\n        params={"q": "test", "limit": 3}\n    )`;
+			updatedContent = updatedContent.replace(multiOriginal, multiUpdated);
+			updatedContent = updatedContent.replace("with requests.Session() as session:", "with httpx.Client() as session:");
+			const mockChanges = [{
 				uri: editor.document.uri,
-				originalContent: editor.document.getText(),
-				updatedContent: editor.document.getText().replace(new RegExp(srcLib, 'g'), tgtLib),
-				hunks: [] // check this
+				originalContent: originalContent,
+				updatedContent: updatedContent,
 			}];
 			migrationState.loadChanges(mockChanges);
 
@@ -95,6 +106,8 @@ export function registerCommands(context: vscode.ExtensionContext) {
 				}
 				await vscode.workspace.applyEdit(edit, { isRefactoring: true });
 				migrationState.clear();
+				codeLensProvider.refresh();
+				inlineDiffProvider.clearDecorations(editor);
 			}
 			else {
 				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'inline' });
