@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as diff from 'diff';
-import { migrationState } from './migrationState';
+import { migrationState } from '../services/migrationState';
 
 export class InlineDiffProvider {
     private addedDecoration = vscode.window.createTextEditorDecorationType({
