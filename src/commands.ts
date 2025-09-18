@@ -3,9 +3,12 @@ import { migrationState, MigrationChange } from './services/migrationState';
 import { configService } from './services/config';
 import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from './services/librariesApi';
 import { runCliTool } from './services/cli';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { telemetryService } from './services/telemetry';
 import { codeLensProvider, InlineDiffProvider } from './providers';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 
 
@@ -61,38 +64,134 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			// // Perform the migration
 			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'...`);
 			console.log(`Migration initiated from '${srcLib}' to '${tgtLib}'`);
-			await runCliTool('libmig --help', cwd); // command
-			telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
+			// await runCliTool('libmig --help', cwd); // command
+			// telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
 
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {return;}
 
-			const originalContent = editor.document.getText();
-			let updatedContent = originalContent;
-			updatedContent = updatedContent.replace("import requests", "import httpx");
-			const multiOriginal = `    resp = requests.get(\n        "https://api.example.com/data",\n        params={"q": "test", "limit": 5}\n    )`;
-			const multiUpdated = `    resp = httpx.get(\n        "https://api.example.com/data2",\n        params={"q": "test", "limit": 3}\n    )`;
-			updatedContent = updatedContent.replace(multiOriginal, multiUpdated);
-			updatedContent = updatedContent.replace("with requests.Session() as session:", "with httpx.Client() as session:");
-			const mockChanges = [{
-				uri: editor.document.uri,
-				originalContent: originalContent,
-				updatedContent: updatedContent,
-			}];
-			migrationState.loadChanges(mockChanges);
 
+			// // Keep the mock version for now
+			const useMockChanges = false;
+			let changes: Omit<MigrationChange, 'hunks'>[] = [];
+
+			if (useMockChanges) {
+				const originalContent = editor.document.getText();
+				let updatedContent = originalContent;
+				updatedContent = updatedContent.replace("import requests", "import httpx");
+				const multiOriginal = `    resp = requests.get(\n        "https://api.example.com/data",\n        params={"q": "test", "limit": 5}\n    )`;
+				const multiUpdated = `    resp = httpx.get(\n        "https://api.example.com/data2",\n        params={"q": "test", "limit": 3}\n    )`;
+				updatedContent = updatedContent.replace(multiOriginal, multiUpdated);
+				updatedContent = updatedContent.replace("with requests.Session() as session:", "with httpx.Client() as session:");
+
+				changes = [{
+					uri: editor.document.uri,
+					originalContent: originalContent,
+					updatedContent: updatedContent,
+				}];
+			}
+			else {
+				// // Create a temporary directory for the migrated files
+                const tempDir = path.join(os.tmpdir(), `libmig-preview-${Date.now()}`);
+				console.log("New Directory:", tempDir);
+                fs.mkdirSync(tempDir, { recursive: true });
+
+                try {
+					// // Filter for relevant files, print the details for now to check
+                    let pythonFiles = await vscode.workspace.findFiles(
+						new vscode.RelativePattern(cwd, '**/*.py'),
+						'{**/node_modules/**,**/.venv/**,**/venv/**,**/.git/**,**/site-packages/**,**/__pycache__/**,**/\\.pytest_cache/**,**/\\.tox/**,**/\\.mypy_cache/**}'
+					);
+					pythonFiles = pythonFiles.filter(file => !file.fsPath.endsWith('_run_tests_.py')); // figure out if this should be filtered before or after
+					const requirementsFiles = await vscode.workspace.findFiles(new vscode.RelativePattern(cwd, '**/requirements.txt'));
+                    console.log(`Found ${pythonFiles.length} Python files in workspace`);
+					console.log("Found Python files in these locations:");
+					pythonFiles.forEach(file => {
+						console.log(file.fsPath);
+					});
+
+					// // Copy all of the files into the temp directory (WIP, but hopefully it can compare the migrated ones stored in temp)
+					const allFilesToCopy = [...pythonFiles, ...requirementsFiles];
+                    for (const fileUri of allFilesToCopy) {
+                        const relativePath = path.relative(cwd, fileUri.fsPath);
+                        const tempFilePath = path.join(tempDir, relativePath);
+                        fs.mkdirSync(path.dirname(tempFilePath), { recursive: true });
+                        const content = fs.readFileSync(fileUri.fsPath, 'utf8');
+                        fs.writeFileSync(tempFilePath, content);
+                    }
+
+					// // Initialize a new git repo, should prevent the InvalidGitRepositoryError
+					try {
+                        execSync('git init', { cwd: tempDir });
+                        execSync('git add .', { cwd: tempDir });
+                        execSync('git commit -m "Initial state for migration"', { cwd: tempDir });
+                    } catch (gitError) {
+                        console.error('Failed to initialize git repository:', gitError);
+                        vscode.window.showErrorMessage('Failed to initialize git for migration. Please ensure git is installed and in your PATH.');
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                        return;
+                    }
+
+                    // // Run CLI on temp dir (WIP) // check this
+                    console.log(`Running migration command in temp directory: ${tempDir}`);
+                    await runCliTool(command, tempDir);
+
+                    // // Compare the files here, diff the originals against migrated copies
+                    const realChanges: Omit<MigrationChange, 'hunks'>[] = [];
+                    for (const fileUri of pythonFiles) {
+
+						if (fileUri.fsPath.endsWith('_run_tests_.py')) {continue;} // check this, maybe not necessary here
+
+                        const relativePath = path.relative(cwd, fileUri.fsPath);
+                        const tempFilePath = path.join(tempDir, relativePath);
+
+                        if (!fs.existsSync(tempFilePath)) {
+                            continue;
+                        }
+
+                        const originalContent = fs.readFileSync(fileUri.fsPath, 'utf8');
+                        const updatedContent = fs.readFileSync(tempFilePath, 'utf8');
+                        if (originalContent !== updatedContent) {
+                            realChanges.push({
+                                uri: fileUri,
+                                originalContent,
+                                updatedContent
+                            });
+                        }
+                    }
+                    changes = realChanges;
+                    console.log(`Found ${changes.length} files with changes`);
+                } catch (error) {
+                    console.error('Error during temp directory migration:', error);
+                    vscode.window.showErrorMessage('Error running migration in temporary directory.');
+                } finally {
+                    try {
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                    } catch (cleanupError) {
+                        console.warn('Failed to clean up temp directory:', cleanupError);
+                    }
+                }
+            }
+            if (changes.length === 0) {
+                vscode.window.showInformationMessage('No changes were detected during migration.');
+                return;
+            }
+			migrationState.loadChanges(changes);
+
+
+			// // Show preview based on mode selected in config
 			const previewMode = configService.get<string>('flags.previewGrouping');
 			console.log("Preview mode:", previewMode);
 			if (previewMode === 'All at once') {
 				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'grouped' });
 				const edit = new vscode.WorkspaceEdit();
-				const changes = migrationState.getChanges();
+				const loadedChanges = migrationState.getChanges();
 
-				if (changes.length === 0) {
+				if (loadedChanges.length === 0) {
 					vscode.window.showInformationMessage('No changes made during migration');
 				}
 
-				for (const change of changes) {
+				for (const change of loadedChanges) {
 					const hunks = migrationState.getHunks(change.uri);
 					const sortedHunks = [...hunks].sort((a, b) => a.originalStartLine - b.originalStartLine); // not sure that this is necessary, just being safe
 					const processedHunkIds = new Set<number>();
@@ -104,12 +203,11 @@ export function registerCommands(context: vscode.ExtensionContext) {
 						if (currentHunk.type === 'removed' && i + 1 < sortedHunks.length) {
 							const nextHunk = sortedHunks[i + 1];
 							if (nextHunk.type === 'added' &&
-								(nextHunk.originalStartLine === currentHunk.originalStartLine ||
-								 nextHunk.originalStartLine === currentHunk.originalStartLine + currentHunk.lines.length)) {
+								(nextHunk.originalStartLine === currentHunk.originalStartLine)) {
 								const startPos = new vscode.Position(currentHunk.originalStartLine, 0);
 								const endPos = new vscode.Position(currentHunk.originalStartLine + currentHunk.lines.length, 0);
 								const range = new vscode.Range(startPos, endPos);
-								const newText = nextHunk.lines.join('\n') + '\n';
+								const newText = nextHunk.lines.join('\n');
 
 								console.log(currentHunk.lines[0], "next");
 								console.log(migrationState.cleanString(currentHunk.lines[0]), "next2");
@@ -121,6 +219,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 								edit.replace(change.uri, range, newText, metadata);
 								processedHunkIds.add(currentHunk.id);
                 				processedHunkIds.add(nextHunk.id);
+								continue;
 							} else {
 								migrationState.handleSingleHunk(edit, change.uri, currentHunk);
 								processedHunkIds.add(currentHunk.id);
