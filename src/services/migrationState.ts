@@ -48,6 +48,35 @@ class MigrationStateService {
         return hunks;
     }
 
+    public handleSingleHunk(edit: vscode.WorkspaceEdit, uri: vscode.Uri, hunk: DiffHunk) {
+        if (hunk.type === 'removed') {
+            const startPos = new vscode.Position(hunk.originalStartLine, 0);
+            const endPos = new vscode.Position(hunk.originalStartLine + hunk.lines.length, 0);
+            const range = new vscode.Range(startPos, endPos);
+
+            edit.delete(uri, range, {
+                label: `Remove '${this.cleanString(hunk.lines[0]).substring(0, 20)}${hunk.lines.length > 1 ? '...' : ''}'`,
+                description: `Line ${hunk.originalStartLine + 1}`,
+                needsConfirmation: true,
+            });
+        }
+        else if (hunk.type === 'added') {
+            const pos = new vscode.Position(hunk.originalStartLine, 0);
+            const insertText = hunk.lines.join('\n') + '\n';
+
+            edit.insert(uri, pos, insertText, {
+                label: `Add '${this.cleanString(hunk.lines[0]).substring(0, 20)}${hunk.lines.length > 1 ? '...' : ''}'`,
+                description: `After line ${hunk.originalStartLine}`,
+                needsConfirmation: true,
+            });
+        }
+    }
+
+    public cleanString(str: string): string {
+        if (!str) {return '';}
+        return str.replace(/\r?\n|\r/g, '').trim();
+    }
+
     public getHunks(uri: vscode.Uri): DiffHunk[] {
         return this.changes.get(uri.toString())?.hunks || [];
     }

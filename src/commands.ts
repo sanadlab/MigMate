@@ -67,11 +67,6 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {return;}
 
-			// const mockChanges = [{
-			// 	uri: editor.document.uri,
-			// 	originalContent: editor.document.getText(),
-			// 	updatedContent: editor.document.getText().replace(new RegExp(srcLib, 'g'), tgtLib),
-			// }];
 			const originalContent = editor.document.getText();
 			let updatedContent = originalContent;
 			updatedContent = updatedContent.replace("import requests", "import httpx");
@@ -92,18 +87,51 @@ export function registerCommands(context: vscode.ExtensionContext) {
 				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'grouped' });
 				const edit = new vscode.WorkspaceEdit();
 				const changes = migrationState.getChanges();
+
 				if (changes.length === 0) {
 					vscode.window.showInformationMessage('No changes made during migration');
 				}
+
 				for (const change of changes) {
-					const fullRange = new vscode.Range(0, 0, Number.MAX_VALUE, Number.MAX_VALUE);
-					const metadata: vscode.WorkspaceEditEntryMetadata = {
-						label: `Migrate ${srcLib} to ${tgtLib}`,
-						description: `Full file migration for ${vscode.workspace.asRelativePath(change.uri)}`,
-						needsConfirmation: true,
-					};
-					edit.replace(change.uri, fullRange, change.updatedContent, metadata);
+					const hunks = migrationState.getHunks(change.uri);
+					const sortedHunks = [...hunks].sort((a, b) => a.originalStartLine - b.originalStartLine); // not sure that this is necessary, just being safe
+					const processedHunkIds = new Set<number>();
+
+					for (let i = 0; i < sortedHunks.length; i++) {
+						const currentHunk = sortedHunks[i];
+						if (processedHunkIds.has(currentHunk.id)) {continue;} // hopefully stops the changes from being unchecked by default
+
+						if (currentHunk.type === 'removed' && i + 1 < sortedHunks.length) {
+							const nextHunk = sortedHunks[i + 1];
+							if (nextHunk.type === 'added' &&
+								(nextHunk.originalStartLine === currentHunk.originalStartLine ||
+								 nextHunk.originalStartLine === currentHunk.originalStartLine + currentHunk.lines.length)) {
+								const startPos = new vscode.Position(currentHunk.originalStartLine, 0);
+								const endPos = new vscode.Position(currentHunk.originalStartLine + currentHunk.lines.length, 0);
+								const range = new vscode.Range(startPos, endPos);
+								const newText = nextHunk.lines.join('\n') + '\n';
+
+								console.log(currentHunk.lines[0], "next");
+								console.log(migrationState.cleanString(currentHunk.lines[0]), "next2");
+								const metadata: vscode.WorkspaceEditEntryMetadata = {
+									label: `Replace '${migrationState.cleanString(currentHunk.lines[0]).substring(0, 15)}...' with '${migrationState.cleanString(nextHunk.lines[0]).substring(0, 15)}...'`,
+									description: `Line ${currentHunk.originalStartLine + 1}`,
+									needsConfirmation: true,
+								};
+								edit.replace(change.uri, range, newText, metadata);
+								processedHunkIds.add(currentHunk.id);
+                				processedHunkIds.add(nextHunk.id);
+							} else {
+								migrationState.handleSingleHunk(edit, change.uri, currentHunk);
+								processedHunkIds.add(currentHunk.id);
+							}
+						} else {
+							migrationState.handleSingleHunk(edit, change.uri, currentHunk);
+							processedHunkIds.add(currentHunk.id);
+						}
+					}
 				}
+
 				await vscode.workspace.applyEdit(edit, { isRefactoring: true });
 				migrationState.clear();
 				codeLensProvider.refresh();

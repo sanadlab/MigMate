@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { migrationState } from '../services/migrationState';
+import { configService } from '../services/config';
 
 export class CodeLensProvider implements vscode.CodeLensProvider {
     private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
@@ -10,6 +11,10 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
     }
 
     provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeLens[]> {
+        const previewMode = configService.get<string>('flags.previewGrouping');
+        if (previewMode === 'All at once') {
+            return []; // stop codelenses from showing up in the background of all-at-once preview
+        }
         const hunks = migrationState.getHunks(document.uri);
         if (hunks.length === 0) {return [];}
 
