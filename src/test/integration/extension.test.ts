@@ -12,4 +12,14 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
 		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
 	});
+
+	// // Basic checks
+	test('Extension should be present', async () => {
+		const ext = vscode.extensions.getExtension('yourpublisher.libmig-prototype');
+		assert.ok(ext);
+	});
+	test('Commands should be registered', async () => {
+		const commands = await vscode.commands.getCommands();
+		assert.ok(commands.includes('libmig.migrate'), "Migration command not registered");
+	});
 });

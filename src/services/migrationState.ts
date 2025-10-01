@@ -28,42 +28,37 @@ class MigrationStateService {
     }
 
     private parseDiff(original: string, updated: string): DiffHunk[] {
-        const originalLines = original.split('\n');
-        const updatedLines = updated.split('\n');
+        // // Normalize the line endings, should fix the current preview issue
+        const originalLines = original.replace(/\r\n/g, '\n').split('\n');
+        const updatedLines = updated.replace(/\r\n/g, '\n').split('\n');
         const diffResult = diff.diffArrays(originalLines, updatedLines); // check this, compare lines vs arrays
-        const tempHunks: DiffHunk[] = [];
-        let currentLine = 0;
-        let hunkId = 0;
 
-        diffResult.forEach(part => {
-            const partLines = part.value;
-            if (part.added) {
-                tempHunks.push({ id: hunkId++, type: 'added', lines: partLines, originalStartLine: currentLine, status: 'pending' });
-            } else if (part.removed) {
-                tempHunks.push({ id: hunkId++, type: 'removed', lines: partLines, originalStartLine: currentLine, status: 'pending' });
-                currentLine += partLines.length;
-            } else {
-                currentLine += partLines.length;
-            }
-        });
-
-        // // Try going through a second time to fix the mismatch in preview
         const hunks: DiffHunk[] = [];
-        for (let i = 0; i < tempHunks.length; i++) {
-            const hunk = tempHunks[i];
-            if (hunk.type === 'added' && i > 0) {
-                const prevHunk = tempHunks[i-1];
-                if (prevHunk.type === 'removed') {
-                    hunks.push({...hunk, originalStartLine: prevHunk.originalStartLine});
-                    continue;
-                }
+        let originalLine = 0;
+        let id = 0;
+        let lastRemovedStart: number | null = null;
+        for (const part of diffResult) {
+            const lines = (part.value as string[]) ?? [];
+            if (part.removed) {
+                const start = originalLine;
+                hunks.push({id: id++, type: 'removed', lines, originalStartLine: start, status: 'pending'});
+                originalLine += lines.length;
+                lastRemovedStart = start;
             }
-            hunks.push(hunk);
+            else if (part.added) {
+                const start = (lastRemovedStart !== null) ? lastRemovedStart : originalLine;
+                hunks.push({id: id++, type: 'added', lines, originalStartLine: start, status: 'pending'});
+                lastRemovedStart = null;
+            }
+            else {
+                originalLine += lines.length;
+                lastRemovedStart = null;
+            }
         }
         return hunks;
     }
 
-    public handleSingleHunk(edit: vscode.WorkspaceEdit, uri: vscode.Uri, hunk: DiffHunk) {
+    public handleSingleHunk(edit: vscode.WorkspaceEdit, uri: vscode.Uri, hunk: DiffHunk, eol: string = '\n') {
         if (hunk.type === 'removed') {
             const startPos = new vscode.Position(hunk.originalStartLine, 0);
             const endPos = new vscode.Position(hunk.originalStartLine + hunk.lines.length, 0);
@@ -71,13 +66,19 @@ class MigrationStateService {
 
             edit.delete(uri, range, {
                 label: `Remove '${this.cleanString(hunk.lines[0]).substring(0, 20)}${hunk.lines.length > 1 ? '...' : ''}'`,
-                description: `Line ${hunk.originalStartLine + 1}`,
+                description: `Lines ${hunk.originalStartLine + 1} - ${hunk.originalStartLine + hunk.lines.length}`,
                 needsConfirmation: true,
             });
         }
         else if (hunk.type === 'added') {
             const pos = new vscode.Position(hunk.originalStartLine, 0);
-            const insertText = hunk.lines.join('\n') + '\n';
+            // const insertText = hunk.lines.join('\n') + '\n';
+            let insertText = hunk.lines.join(eol);
+
+            // // Case where EOF tries to add empty string? check this
+            if (hunk.lines.length === 1 && hunk.lines[0] === '' && hunk.originalStartLine >= 0) {
+                insertText = eol; // might want to check current EOF char instead of always adding
+            }
 
             edit.insert(uri, pos, insertText, {
                 label: `Add '${this.cleanString(hunk.lines[0]).substring(0, 20)}${hunk.lines.length > 1 ? '...' : ''}'`,
@@ -111,8 +112,11 @@ class MigrationStateService {
     async applyAll() {
         const edit = new vscode.WorkspaceEdit();
         for (const change of this.getChanges()) {
+            const doc = await vscode.workspace.openTextDocument(change.uri);
+            const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
+            const normalized = change.updatedContent.replace(/\r\n|\n/g, eol);
             const fullRange = new vscode.Range(0, 0, Number.MAX_VALUE, Number.MAX_VALUE);
-            edit.replace(change.uri, fullRange, change.updatedContent);
+            edit.replace(change.uri, fullRange, normalized);
         }
         await vscode.workspace.applyEdit(edit);
         this.clear();

@@ -63,11 +63,38 @@ export async function getTargetLibrary(srcLib: string): Promise<string | undefin
 
 // // Parse requirements.txt to get library names
 export async function getLibrariesFromRequirements(): Promise<string[]> {
+    const reqFileName = configService.get<string>('options.requirementFileName') || 'requirements.txt';
+
+    // // Check the active editor
     const editor = vscode.window.activeTextEditor;
-    if (!editor || !editor.document.fileName.endsWith('requirements.txt')) {
+    if (editor && editor.document.fileName.toLowerCase().endsWith(reqFileName)) {
+        const text = editor.document.getText();
+        const libraries = text.match(/[a-zA-Z0-9-_]+/g) || [];
+        return Array.from(new Set(libraries));
+    }
+
+    // // Search workspace
+    const files = await vscode.workspace.findFiles(
+        `**/${reqFileName}`,
+        '**/{node_modules,venv,.venv,__pycache__}/**',
+        1
+    );
+    if (files.length === 0) {
+        vscode.window.showWarningMessage(`No '${reqFileName}' found in workspace.`);
         return [];
     }
-    const text = editor.document.getText();
+
+    let reqFile = files[0];
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders) {
+        const root = workspaceFolders[0].uri.fsPath;
+        const rootFile = files.find(f => f.fsPath.toLowerCase() === `${root}\\${reqFileName}`
+        || f.fsPath.toLowerCase() === `${root}/${reqFileName}`);
+        if (rootFile) {reqFile = rootFile;}
+    }
+
+    const doc = await vscode.workspace.openTextDocument(reqFile);
+    const text = doc.getText();
     const libraries = text.match(/[a-zA-Z0-9-_]+/g) || [];
     return Array.from(new Set(libraries));
 }

@@ -6,6 +6,7 @@ import { runCliTool } from './services/cli';
 import { exec, execSync } from 'child_process';
 import { telemetryService } from './services/telemetry';
 import { codeLensProvider, InlineDiffProvider } from './providers';
+import { checkTestResults, showTestResultsDetail } from './services/testResults';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -136,6 +137,19 @@ export function registerCommands(context: vscode.ExtensionContext) {
                     console.log(`Running migration command in temp directory: ${tempDir}`);
                     await runCliTool(command, tempDir);
 
+					// // Check for test failures
+					const testResults = await checkTestResults(tempDir);
+					if (testResults.hasFailures) {
+						const viewDetailsAction = 'View Details';
+						const response = await vscode.window.showWarningMessage(
+							`${testResults.failureCount} test${testResults.failureCount !== 1 ? 's' : ''} failed during migration.`,
+							viewDetailsAction
+						);
+						if (response === viewDetailsAction) {
+							showTestResultsDetail(testResults);
+						}
+					}
+
                     // // Compare the files here, diff the originals against migrated copies
                     const realChanges: Omit<MigrationChange, 'hunks'>[] = [];
                     for (const fileUri of pythonFiles) {
@@ -165,11 +179,13 @@ export function registerCommands(context: vscode.ExtensionContext) {
                     console.error('Error during temp directory migration:', error);
                     vscode.window.showErrorMessage('Error running migration in temporary directory.');
                 } finally {
-                    try {
-                        fs.rmSync(tempDir, { recursive: true, force: true });
-                    } catch (cleanupError) {
-                        console.warn('Failed to clean up temp directory:', cleanupError);
-                    }
+                //     try {
+                //         fs.rmSync(tempDir, { recursive: true, force: true }); // temp stop cleanup
+                //     } catch (cleanupError) {
+                //         console.warn('Failed to clean up temp directory:', cleanupError);
+                //     }
+
+					context.workspaceState.update('lastMigrationTempDir', tempDir);
                 }
             }
             if (changes.length === 0) {
@@ -185,6 +201,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			if (previewMode === 'All at once') {
 				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'grouped' });
 				const edit = new vscode.WorkspaceEdit();
+				const fileInfo = new Map<string, { eol: string; endsWithEol: boolean; lineCount: number }>();
 				const loadedChanges = migrationState.getChanges();
 
 				if (loadedChanges.length === 0) {
@@ -192,41 +209,68 @@ export function registerCommands(context: vscode.ExtensionContext) {
 				}
 
 				for (const change of loadedChanges) {
+					// // Keep track of EOL/EOF characters for each file being changed
+					const key = change.uri.toString();
+					if (!fileInfo.has(key)) {
+						const doc = await vscode.workspace.openTextDocument(change.uri);
+						const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
+						fileInfo.set(key, {eol, endsWithEol: doc.getText().endsWith(eol), lineCount: doc.lineCount});
+					}
+					const { eol, endsWithEol, lineCount } = fileInfo.get(key)!;
+
+					// // Retrieve the hunks and sort the changes from bottom to top
 					const hunks = migrationState.getHunks(change.uri);
-					const sortedHunks = [...hunks].sort((a, b) => a.originalStartLine - b.originalStartLine); // not sure that this is necessary, just being safe
+					console.log(hunks);
 					const processedHunkIds = new Set<number>();
 
-					for (let i = 0; i < sortedHunks.length; i++) {
-						const currentHunk = sortedHunks[i];
+					for (let i = 0; i < hunks.length; i++) {
+						const currentHunk = hunks[i];
 						if (processedHunkIds.has(currentHunk.id)) {continue;} // hopefully stops the changes from being unchecked by default
 
-						if (currentHunk.type === 'removed' && i + 1 < sortedHunks.length) {
-							const nextHunk = sortedHunks[i + 1];
-							if (nextHunk.type === 'added' &&
-								(nextHunk.originalStartLine === currentHunk.originalStartLine)) {
+						// // Pair remove + added --> replacement
+						if (currentHunk.type === 'removed' && i + 1 < hunks.length) {
+							const nextHunk = hunks[i + 1];
+							if (nextHunk.type === 'added' && nextHunk.originalStartLine === currentHunk.originalStartLine) {
 								const startPos = new vscode.Position(currentHunk.originalStartLine, 0);
 								const endPos = new vscode.Position(currentHunk.originalStartLine + currentHunk.lines.length, 0);
 								const range = new vscode.Range(startPos, endPos);
-								const newText = nextHunk.lines.join('\n');
+								let newText = nextHunk.lines.join(eol);
 
-								console.log(currentHunk.lines[0], "next");
-								console.log(migrationState.cleanString(currentHunk.lines[0]), "next2");
+								// // Respect original file's trailing EOL
+								const afterLine = currentHunk.originalStartLine + currentHunk.lines.length;
+								const reachedEOF = afterLine >= lineCount;
+								if (reachedEOF) {
+									if (endsWithEol && !newText.endsWith(eol)) {
+										newText += eol;
+									}
+									else if (!endsWithEol && newText.endsWith(eol)) {
+										newText = newText.replace(new RegExp(`${eol}$`), '');
+									}
+								}
+								else {
+									if (nextHunk.lines.length > 0 && !newText.endsWith(eol)) {
+										newText += eol;
+									}
+								}
+
 								const metadata: vscode.WorkspaceEditEntryMetadata = {
 									label: `Replace '${migrationState.cleanString(currentHunk.lines[0]).substring(0, 15)}...' with '${migrationState.cleanString(nextHunk.lines[0]).substring(0, 15)}...'`,
-									description: `Line ${currentHunk.originalStartLine + 1}`,
+									description: `Lines ${currentHunk.originalStartLine + 1} - ${currentHunk.originalStartLine + currentHunk.lines.length}`,
 									needsConfirmation: true,
 								};
 								edit.replace(change.uri, range, newText, metadata);
 								processedHunkIds.add(currentHunk.id);
                 				processedHunkIds.add(nextHunk.id);
 								continue;
-							} else {
-								migrationState.handleSingleHunk(edit, change.uri, currentHunk);
-								processedHunkIds.add(currentHunk.id);
 							}
-						} else {
-							migrationState.handleSingleHunk(edit, change.uri, currentHunk);
-							processedHunkIds.add(currentHunk.id);
+						}
+
+						// // Standalone add/remove
+						if (!processedHunkIds.has(currentHunk.id)) {
+							console.log("Standalone hunk:", currentHunk);
+							console.log("EOL character representation:", eol === '\n' ? "\\n" : "\\r\\n");
+    						console.log("EOL length:", eol.length);
+							migrationState.handleSingleHunk(edit, change.uri, currentHunk, eol);
 						}
 					}
 				}
@@ -250,6 +294,19 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			telemetryService.sendTelemetryErrorEvent('migrationError', { error: (error as Error).message });
 			console.error('Migration error:', error);
 		}
+	});
+
+
+
+	// // Command to display migration test results
+	const viewTestResultsCommand = vscode.commands.registerCommand('libmig.viewTestResults', async () => {
+		const tempDir = context.workspaceState.get<string>('lastMigrationTempDir');
+		if (!tempDir || !fs.existsSync(tempDir)) {
+			vscode.window.showInformationMessage('No recent migration test results available');
+			return;
+		}
+		const testResults = await checkTestResults(tempDir);
+		showTestResultsDetail(testResults);
 	});
 
 
@@ -385,5 +442,5 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	context.subscriptions.push(migrateCommand, acceptHunkCommand, rejectHunkCommand, viewDiffCommand, backupCommand, restoreCommand, healthCheck, setAPI);
+	context.subscriptions.push(migrateCommand, viewTestResultsCommand, acceptHunkCommand, rejectHunkCommand, viewDiffCommand, backupCommand, restoreCommand, healthCheck, setAPI);
 }
