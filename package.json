@@ -60,6 +60,11 @@
         "title": "LibMig",
         "type": "object",
         "properties": {
+          "libmig.options.useTempDirectory": {
+            "type": "boolean",
+            "default": false,
+            "description": "Direct the migrated output into a temp directory instead of directly modifying the workspace files"
+          },
           "libmig.options.previewOnMigrationFailure": {
             "type": "boolean",
             "default": false,

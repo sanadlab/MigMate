@@ -20,7 +20,12 @@ class ConfigService {
         }));
     }
 
-    public get<T>(key: string): T | undefined {
+    public get<T>(key: string, defaultValue: T): T;
+    public get<T>(key: string): T | undefined;
+    public get<T>(key: string, defaultValue?: T): T | undefined {
+        if (defaultValue !== undefined) {
+            return this.config.get<T>(key, defaultValue);
+        }
         return this.config.get<T>(key);
     }
 

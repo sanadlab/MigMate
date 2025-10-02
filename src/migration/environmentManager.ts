@@ -8,12 +8,6 @@ import { logger } from '../services/logging';
 
 
 export class EnvironmentManager { // maybe have a temp and regular version?
-    // async setupEnvironment(cwd: string): Promise<string> {
-    //     // Create temp dir
-    //     // Initialize git
-    //     // Return temp dir path
-    // }
-
     public async createTempDirectory(): Promise<string> {
         const tempDir = path.join(os.tmpdir(), `libmig-preview-${Date.now()}`);
         logger.info(`Creating temporary directory: ${tempDir}`);
@@ -46,8 +40,8 @@ export class EnvironmentManager { // maybe have a temp and regular version?
         }
     }
 
-    public saveTempDirPath(context: vscode.ExtensionContext, tempDir: string): void {
-        context.workspaceState.update('lastMigrationTempDir', tempDir);
-        logger.info(`Saved temp directory path to workspace state: ${tempDir}`); // check this if reenable deletion
+    public saveResultsPath(context: vscode.ExtensionContext, resultsDir: string): void {
+        context.workspaceState.update('lastMigrationResults', resultsDir);
+        logger.info(`Saved results path to workspace state: ${resultsDir}`);
     }
 }

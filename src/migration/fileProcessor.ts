@@ -6,7 +6,7 @@ import { MigrationChange } from '../services/migrationState';
 
 
 
-export class FileProcessor {
+export class FileProcessor { // update this
     public async findPythonFiles(workspacePath: string): Promise<{ pythonFiles: vscode.Uri[], requirementsFiles: vscode.Uri[] }> {
         logger.info('Finding Python files in workspace');
         let pythonFiles = await vscode.workspace.findFiles(
@@ -33,20 +33,32 @@ export class FileProcessor {
         logger.info('Files copied successfully');
     }
 
-    public compareFiles(originalFiles: vscode.Uri[], workspacePath: string, tempDir: string): Omit<MigrationChange, 'hunks'>[] {
-        logger.info('Comparing original files with migrated files');
+    public compareFiles(comparisonFiles: vscode.Uri[], workspacePath: string, comparePath: string, isReversed: boolean = false): Omit<MigrationChange, 'hunks'>[] {
+        logger.info(`Comparing files between workspace and ${isReversed ? 'premigration backup' : 'temporary directory'}`);
         const changes: Omit<MigrationChange, 'hunks'>[] = [];
 
-        for (const fileUri of originalFiles) {
+        for (const fileUri of comparisonFiles) {
             if (fileUri.fsPath.endsWith('_run_tests_.py')) {continue;} // check this for dupe
 
             const relativePath = path.relative(workspacePath, fileUri.fsPath);
-            const tempFilePath = path.join(tempDir, relativePath);
+            const compareFilePath = path.join(comparePath, relativePath);
 
-            if (!fs.existsSync(tempFilePath)) {continue;}
+            if (!fs.existsSync(compareFilePath)) {continue;}
 
-            const originalContent = fs.readFileSync(fileUri.fsPath, 'utf8');
-            const updatedContent = fs.readFileSync(tempFilePath, 'utf8');
+            // // Try reading the backup/temp files
+            let workspaceContent: string;
+            let compareContent: string;
+            try {
+                workspaceContent = fs.readFileSync(fileUri.fsPath, 'utf8');
+                compareContent = fs.readFileSync(compareFilePath, 'utf8');
+            } catch (err) {
+                logger.warn(`Failed to read file content: ${err}`);
+                continue;
+            }
+
+            // // Assign original and updated
+            const originalContent = isReversed ? compareContent : workspaceContent;
+            const updatedContent = isReversed ? workspaceContent : compareContent;
             if (originalContent !== updatedContent) {
                 changes.push({
                     uri: fileUri,
