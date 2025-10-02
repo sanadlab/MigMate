@@ -1,27 +1,17 @@
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
 import { configService } from './config';
+import { logger } from './logging';
 
-
-
-let libmigChannel: vscode.OutputChannel;
-
-function getOutputChannel(): vscode.OutputChannel {
-    if (!libmigChannel) {
-        libmigChannel = vscode.window.createOutputChannel('LibMig');
-    }
-    return libmigChannel;
-}
 
 
 // // Run target command in CLI
 export function runCliTool(command: string, cwd: string) {
-    const channel = getOutputChannel();
-    channel.show(true);
-    channel.appendLine(`Running command: ${command}\n`);
+    logger.show();
+    logger.info(`Running command in ${cwd}: ${command}`);
 
-    // add timeout?
-    const startTime = Date.now();
+    // // add timeout?
+    // const startTime = Date.now();
 
     // check this
     return new Promise<void>((resolve, reject) => {
@@ -29,24 +19,26 @@ export function runCliTool(command: string, cwd: string) {
         const child = spawn(cmd, args, { cwd, shell: true });
 
         child.stdout.on('data', (data: Buffer) => {
-            channel.append(data.toString());
+            logger.append(data.toString());
         });
         child.stderr.on('data', (data: Buffer) => {
-            channel.append(data.toString());
+            logger.append(data.toString());
         });
         child.on('close', (code) => {
-            channel.appendLine(`\nCommand finished with exit code: ${code}`);
+            logger.info(`Command finished with exit code: ${code}`);
             if (code === 0) {
                 vscode.window.showInformationMessage('LibMig process completed successfully');
                 resolve();
             } else {
-                vscode.window.showErrorMessage(`LibMig process failed with exit code ${code}`);
-                reject(new Error(`Process failed with exit code ${code}`));
+                const err = new Error(`Process failed with exit code ${code}`);
+                logger.error(err.message, err);
+                vscode.window.showErrorMessage(err.message);
+                reject(err);
             }
         });
         child.on('error', (err) => {
+            logger.error(`Failed to start process: ${err.message}`, err);
             vscode.window.showErrorMessage(`Failed with error: ${err.message}`);
-            channel.appendLine(`\nError: ${err.message}`);
             reject(err);
         });
     });

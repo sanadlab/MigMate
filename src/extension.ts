@@ -5,6 +5,7 @@ import { registerProviders } from './providers';
 import { configService } from './services/config';
 import { telemetryService } from './services/telemetry';
 import { contextService } from './services/context';
+import { logger } from './services/logging';
 
 
 
@@ -13,6 +14,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const connectionString = 'InstrumentationKey=42acdffc-3ef3-4cf0-9542-b288f124283b;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/;LiveEndpoint=https://westus2.livediagnostics.monitor.azure.com/;ApplicationId=396883d1-1f45-43f7-8db2-fe39284e88a8';
 	const reporter = new TelemetryReporter(connectionString);
 	context.subscriptions.push(reporter);
+	context.subscriptions.push(logger);
 
 	// // Initialize services
 	contextService.initialize(context);
