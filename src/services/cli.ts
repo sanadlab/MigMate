@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
+import { configService } from './config';
 
 
 
@@ -49,4 +50,45 @@ export function runCliTool(command: string, cwd: string) {
             reject(err);
         });
     });
+}
+
+export function buildCliCommand(srcLib: string, tgtLib: string): string {
+    // // New construction of CLI command (WIP)
+    const commandParts = ['libmig', srcLib, tgtLib];
+
+    // // Only add flags that differ from their default value
+    const addFlag = (key: string, cliFlag: string) => {
+        const details = configService.inspect(key);
+        const currentValue = configService.get(key);
+
+        if (details && currentValue !== undefined && currentValue !== details.defaultValue) { // skip if undefined or default value
+            if (typeof currentValue === 'boolean') {
+                if (currentValue === true) { // only add True booleans
+                    commandParts.push(cliFlag);
+                }
+            }
+            else if (currentValue !== '') { // ignore empty strings
+                if (Array.isArray(currentValue) && currentValue.length > 0) { // currently only for migrationRounds // check this to see Integer vs Array
+                    commandParts.push(`${cliFlag}=${currentValue.join(',')}`);
+                }
+                else if (!Array.isArray(currentValue)) { // check if this is fine for all string config options
+                    commandParts.push(`${cliFlag}=${currentValue}`);
+                }
+            }
+        }
+    };
+
+    // // Add all of the relevant flags
+    addFlag('flags.pythonVersion', '--python-version');
+    addFlag('flags.forceRerun', '--force-rerun');
+    addFlag('flags.smartSkipTests', '--smart-skip-tests');
+    addFlag('flags.maxFileCount', '--max-files');
+    addFlag('flags.LLMClient', '--llm');
+    addFlag('flags.migrationRounds', '--rounds');
+    addFlag('flags.repositoryName', '--repo');
+    addFlag('flags.testSuitePath', '--test-root');
+    addFlag('flags.outputPath', '--output-path');
+    addFlag('flags.requirementFilePath', '--requirements-file-path');
+
+    return commandParts.join(' ');
 }

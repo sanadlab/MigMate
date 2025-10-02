@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { migrationState, MigrationChange } from './services/migrationState';
 import { configService } from './services/config';
 import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from './services/librariesApi';
-import { runCliTool } from './services/cli';
+import { runCliTool, buildCliCommand } from './services/cli';
 import { exec, execSync } from 'child_process';
 import { telemetryService } from './services/telemetry';
 import { codeLensProvider, InlineDiffProvider } from './providers';
@@ -53,28 +53,18 @@ export function registerCommands(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			// // Set LibMig flags based on config
-			const pythonVersion = configService.get<string>('flags.pythonVersion');
-			const forceRerun = configService.get<boolean>('flags.forceRerun');
-
-			// // Construct CLI command using flags
-			let command = `libmig ${srcLib} ${tgtLib}`;
-			if (pythonVersion) { command += ` --python-version=${pythonVersion}`; }
-			if (forceRerun) { command += ' --force-rerun'; }
-
-			// // Perform the migration
-			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'...`);
-			console.log(`Migration initiated from '${srcLib}' to '${tgtLib}'`);
-			// await runCliTool('libmig --help', cwd); // command
-			// telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
-
+			// // Check this
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {return;}
-
 
 			// // Keep the mock version for now
 			const useMockChanges = false;
 			let changes: Omit<MigrationChange, 'hunks'>[] = [];
+
+			// // Perform the migration
+			vscode.window.showInformationMessage(`Migrating from library '${srcLib}' to library '${tgtLib}'...`);
+			console.log(`Migration initiated from '${srcLib}' to '${tgtLib}'`);
+			telemetryService.sendTelemetryEvent('migrationBegun', { source: srcLib, target: tgtLib });
 
 			if (useMockChanges) {
 				const originalContent = editor.document.getText();
@@ -135,6 +125,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
                     // // Run CLI on temp dir (WIP) // check this
                     console.log(`Running migration command in temp directory: ${tempDir}`);
+					const command = buildCliCommand(srcLib, tgtLib);
                     await runCliTool(command, tempDir);
 
 					// // Check for test failures
@@ -193,6 +184,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
                 return;
             }
 			migrationState.loadChanges(changes);
+			telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
 
 
 			// // Show preview based on mode selected in config
@@ -280,7 +272,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 				codeLensProvider.refresh();
 				inlineDiffProvider.clearDecorations(editor);
 			}
-			else {
+			else { // consider removing this branch
 				telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'inline' });
 				vscode.window.visibleTextEditors.forEach(editor => {
 					if (migrationState.getChange(editor.document.uri)) {
@@ -311,7 +303,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	// // Hunk commands for preview
+	// // Hunk commands for inline preview
 	const acceptHunkCommand = vscode.commands.registerCommand('libmig.acceptHunk', async (uri: vscode.Uri, hunkId: number) => {
 		const hunk = migrationState.getHunks(uri).find(h => h.id === hunkId);
 		if (!hunk || hunk.status !== 'pending') {return;}
@@ -331,7 +323,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	// // WIP diff view
+	// // Outdated diff view, keep for visual comparison
 	const viewDiffCommand = vscode.commands.registerCommand('libmig.viewDiff', async () => {
 		console.log('Viewing diff...');
 		const editor = vscode.window.activeTextEditor;

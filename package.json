@@ -77,7 +77,7 @@
           },
           "libmig.options.enableSuggestions.(Experimental)": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "description": "Suggest suitable target libraries by querying Libraries.io"
           },
           "libmig.flags.maxFileCount": {
@@ -95,7 +95,7 @@
             "default": "openai",
             "description": "Select an LLM client to use for migrations"
           },
-          "libmig.flags.previewGrouping": {
+          "libmig.options.previewGrouping": {
             "type": "string",
             "enum": [
               "One-by-one",
@@ -115,12 +115,17 @@
               "postmig"
             ],
             "default": [],
-            "description": "Show a preview for failed migrations"
+            "description": "Specify which migration rounds should be run"
           },
           "libmig.flags.pythonVersion": {
             "type": "string",
             "default": "3.12",
             "description": "Enter the Python version"
+          },
+          "libmig.flags.repositoryName": {
+            "type": "string",
+            "default": "",
+            "description": "Enter the name of the repository being used. If blank, assumes the project directory name."
           },
           "libmig.options.pytestFlags": {
             "type": "string",
@@ -137,10 +142,10 @@
             "default": ".libmig",
             "description": "Set the path to the desired output directory"
           },
-          "libmig.options.requirementFileName": {
+          "libmig.flags.requirementFilePath": {
             "type": "string",
             "default": "requirements.txt",
-            "description": "Set the default name for the requirement file"
+            "description": "Set the path to the desired requirement file"
           }
         }
       }

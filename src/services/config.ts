@@ -23,6 +23,10 @@ class ConfigService {
     public get<T>(key: string): T | undefined {
         return this.config.get<T>(key);
     }
+
+    public inspect<T>(key: string) {
+        return this.config.inspect<T>(key);
+    }
 }
 
 export const configService = new ConfigService();
