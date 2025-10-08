@@ -1,6 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { logger } from './logging';
+
+interface MigrationDetails {
+    repoName: string;
+    sourceLib: string;
+    targetLib: string;
+    versions?: {
+        source?: string;
+        target?: string;
+    }
+    commit?: string;
+    timestamp?: string;
+}
 
 export interface TestFailure {
     file: string;
@@ -15,28 +28,38 @@ export interface TestResults {
     failures: TestFailure[];
     roundResults: Map<string, {passed: number, failed: number, skipped: number}>;
     logContent?: string;
+    migrationDetails?: MigrationDetails
 }
 
 // // Check test results in the LibMig output directory
-export async function checkTestResults(tempDir: string): Promise<TestResults> {
+export async function checkTestResults(baseDir: string): Promise<TestResults> {
+    // // Check for .libmig directory
+    let libmigDir: string;
+    if (path.basename(baseDir) === '.libmig') {
+        libmigDir = baseDir;
+    } else {
+        libmigDir = path.join(baseDir, '.libmig');
+    }
+
     const results: TestResults = {
         hasFailures: false,
         failureCount: 0,
         failures: [],
-        roundResults: new Map()
+        roundResults: new Map(),
+        migrationDetails: undefined
     };
 
-    // // Try to read the log.md file
-    const logPath = path.join(tempDir, '.libmig', 'log.md');
+    if (!fs.existsSync(libmigDir)) {
+        logger.warn(`No .libmig directory found at path: ${libmigDir}`);
+        return results;
+    }
+    logger.info(`Searching for test results in: ${libmigDir}`);
+    results.migrationDetails = getMigrationDetails(libmigDir);
+
+    // // Try to read the log.md file // check this
+    const logPath = path.join(libmigDir, 'log.md');
     if (fs.existsSync(logPath)) {
         results.logContent = fs.readFileSync(logPath, 'utf8');
-    }
-
-    // // Check for .libmig directory
-    const libmigDir = path.join(tempDir, '.libmig');
-    if (!fs.existsSync(libmigDir)) {
-        console.log('No .libmig directory found');
-        return results;
     }
 
     // // Possible round directories
@@ -166,6 +189,43 @@ function parseJsonTestReport(report: any, round: string): TestFailure[] {
     return failures;
 }
 
+// // Pull additional migration details from 'report.yaml'
+function getMigrationDetails(libmigDir: string): MigrationDetails | undefined {
+    try {
+        // // Find report path
+        const reportPath = path.join(libmigDir, 'report.yaml');
+        if (!fs.existsSync(reportPath)) {
+            logger.warn(`No report.yaml found in ${libmigDir}`);
+            return undefined;
+        }
+        const reportContent = fs.readFileSync(reportPath, 'utf8');
+
+        // // Regex parsing
+        const repoMatch = /^repo: (.+)$/m.exec(reportContent);
+        const commitMatch = /^commit: (.+)$/m.exec(reportContent);
+        const sourceMatch = /^source: (.+)$/m.exec(reportContent);
+        const targetMatch = /^target: (.+)$/m.exec(reportContent);
+        const sourceVersionMatch = /source_version: (.*?)/.exec(reportContent);
+        const targetVersionMatch = /target_version: (.*?)/.exec(reportContent);
+        const timestampMatch = /finished_at: ['"](.+?)['"]/.exec(reportContent);
+
+        return {
+            repoName: repoMatch?.[1] || 'Unknown',
+            commit: commitMatch?.[1],
+            sourceLib: sourceMatch?.[1] || 'Unknown',
+            targetLib: targetMatch?.[1] || 'Unknown',
+            versions: {
+                source: sourceVersionMatch?.[1],
+                target: targetVersionMatch?.[1]
+            },
+            timestamp: timestampMatch?.[1]
+        };
+    } catch (error) {
+        logger.error(`Error parsing migration details: ${error}`);
+        return undefined;
+    }
+}
+
 // // Show test results in a WebView panel
 export function showTestResultsDetail(results: TestResults): void {
     // // Create and show a webview
@@ -180,6 +240,47 @@ export function showTestResultsDetail(results: TestResults): void {
 
 // // Generate HTML for displaying test results
 function generateTestResultsHtml(results: TestResults): string {
+    let migrationInfoHtml = '';
+    if (results.migrationDetails) {
+        const details = results.migrationDetails;
+        console.log(details);
+        // const sourceText = details.versions?.source
+        //     ? `${details.sourceLib} (${details.versions.source})`
+        //     : details.sourceLib;
+        // const targetText = details.versions?.target
+        //     ? `${details.targetLib} (${details.versions.target})`
+        //     : details.targetLib;
+        // <h3>Migration Details</h3>
+        migrationInfoHtml = `
+        <div class="migration-info">
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Repository:</span>
+                    <span class="info-value">${details.repoName || 'N/A'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Migration:</span>
+                    <span class="info-value">${details.sourceLib || 'Unknown'} → ${details.targetLib || 'Unknown'}</span>
+                </div>
+                ${details.versions?.source ? `
+                <div class="info-item">
+                    <span class="info-label">Source Version:</span>
+                    <span class="info-value">${details.versions.source}</span>
+                </div>` : ''}
+                ${details.versions?.target ? `
+                <div class="info-item">
+                    <span class="info-label">Target Version:</span>
+                    <span class="info-value">${details.versions.target}</span>
+                </div>` : ''}
+                ${details.timestamp ? `
+                <div class="info-item">
+                    <span class="info-label">Migration Started:</span>
+                    <span class="info-value">${details.timestamp}</span>
+                </div>` : ''}
+            </div>
+        </div>`;
+    }
+
     let roundsHtml = '';
     results.roundResults.forEach((stats, round) => {
         roundsHtml += `
@@ -317,14 +418,53 @@ function generateTestResultsHtml(results: TestResults): string {
                 color: var(--vscode-editor-foreground, #eee);
                 border: 1px solid var(--vscode-panel-border, #444);
             }
+            .migration-info {
+                background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background, #222));
+                border: 1px solid var(--vscode-panel-border, #444);
+                border-radius: 5px;
+                padding: 15px;
+                margin-bottom: 20px;
+                box-shadow: 0 1px 4px 0 rgba(0,0,0,0.07);
+            }
+
+            .migration-info h3 {
+                margin-top: 0;
+                margin-bottom: 10px;
+                color: var(--vscode-editor-foreground);
+            }
+
+            .info-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+                grid-gap: 10px;
+            }
+
+            .info-item {
+                display: flex;
+                flex-direction: column;
+            }
+
+            .info-label {
+                font-size: 0.9em;
+                color: var(--vscode-descriptionForeground, #aaa);
+            }
+
+            .info-value {
+                font-weight: bold;
+                color: var(--vscode-editor-foreground);
+            }
         </style>
     </head>
     <body>
+        ${migrationInfoHtml}
         <h2>Migration Test Results</h2>
         <div class="summary">
             ${results.failureCount > 0
                 ? `<span class="failed">❌ ${results.failureCount} test${results.failureCount !== 1 ? 's' : ''} failed</span>`
-                : '<span class="passed">✅ All tests passed</span>'}
+                : results.roundResults.size > 0
+                    ? '<span class="passed">✅ All tests passed</span>'
+                    : '<span class="skipped">No test results found</span>'
+                }
         </div>
 
         <h3>Results by Migration Round</h3>
@@ -368,3 +508,6 @@ function escapeHtml(unsafe: string): string {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
+
+// // WIP to check CLI output for failures (use as backup? or maybe for non-test failure issues?)
+function parseCliOutput(buffer: string) {}
