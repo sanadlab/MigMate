@@ -10,6 +10,7 @@ import { FileProcessor } from './fileProcessor';
 import { MigrationExecutor } from './migrationExecutor';
 import { PreviewManager } from './previewManager';
 import { configService } from '../services/config';
+import { MigrationChange } from '../services/migrationState';
 
 
 
@@ -59,7 +60,7 @@ export class MigrationService {
                 workspacePath,
                 tempDir
             );
-            this.environmentManager.initGitRepository(tempDir);
+            this.environmentManager.initGitRepository(tempDir); // check this
             // // Perform the migration and check for test failures
             await this.migrationExecutor.executeMigration(srcLib, tgtLib, tempDir);
             const testResults = await checkTestResults(tempDir);
@@ -90,8 +91,9 @@ export class MigrationService {
         try {
             // // Save Python filepaths before migration
             const { pythonFiles, requirementsFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
-            // // Perform the migration and check for test failures
             await this.migrationExecutor.executeMigration(srcLib, tgtLib, workspacePath);
+
+            // // Check for test failures
             const testResults = await checkTestResults(workspacePath);
             if (testResults.hasFailures) {
                 const viewDetailsAction = 'View Details';
@@ -103,23 +105,113 @@ export class MigrationService {
                     showTestResultsDetail(testResults);
                 }
             }
+
             // // Check the unmodified copy under `.libmig/0-premig/files` folder
             const premigDir = path.join(workspacePath, '.libmig', '0-premig', 'files'); // check this once output folder config is fully implemented
             if (!fs.existsSync(premigDir)) {
                 logger.warn(`Premigration backup directory not found at ${premigDir}`);
-                vscode.window.showInformationMessage(`Migration completed, but no change preview is available.`);
+                vscode.window.showWarningMessage("Could not find backup files in output directory.");
                 return;
             }
-            // // Compare files and show preview
-            const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, premigDir, true);
+
+            // // Store migrated content in memory (WIP)
+            const migratedContent = new Map<string, string>();
+            for (const fileUri of pythonFiles) {
+                try {
+                    const filePath = fileUri.fsPath;
+                    if (fs.existsSync(filePath)) {
+                        migratedContent.set(filePath, fs.readFileSync(filePath, 'utf-8'));
+                        // logger.info(`Stored migrated content for ${path.basename(filePath)}`);
+                    }
+                } catch (error) {
+                    logger.warn(`Failed to read migrated content: ${error}`);
+                }
+            }
+
+            // // Restore original files (WIP) // is this better than saving pre-mig content in memory?
+            const restored = await this.restoreFromBackup(workspacePath);
+            if (!restored) {
+                logger.warn("Failed to restore original files");
+                vscode.window.showWarningMessage("Failed to restore original files for preview.");
+                return;
+            }
+
+            // // Compare files against stored content
+            const changes: Omit<MigrationChange, 'hunks'>[] = [];
+            for (const fileUri of pythonFiles) {
+                const filePath = fileUri.fsPath;
+                if (migratedContent.has(filePath)) {
+                    try {
+                        const doc = await vscode.workspace.openTextDocument(fileUri);
+                        const originalContent = doc.getText();
+                        const updatedContent = migratedContent.get(filePath)!;
+                        if (originalContent !== updatedContent) {
+                            changes.push({
+                                uri: fileUri,
+                                originalContent,
+                                updatedContent
+                            });
+                        }
+                    } catch (error) {
+                        logger.warn(`Failed to build changes for ${fileUri.fsPath}: ${error}`);
+                    }
+                }
+            }
+            console.log("Changes:", changes);
+            // // Save results and show preview
             this.environmentManager.saveResultsPath(this.context, path.join(workspacePath, '.libmig')); // consider renaming // check this
             await this.previewManager.showChanges(changes, srcLib, tgtLib);
+
             logger.info('Migration process completed successfully (direct)');
             telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, mode: 'direct', changesFound: changes.length.toString() });
         } catch (error) {
             logger.error('Error during migration process (direct)', error as Error);
             throw error;
         }
+    }
+
+    public async restoreFromBackup(workspacePath: string): Promise<boolean> {
+        logger.info("Restoring files to pre-migration state...");
+        const { pythonFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
+
+        // // Check the unmodified copies under `.libmig/0-premig/files` folder
+        const premigDir = path.join(workspacePath, '.libmig', '0-premig', 'files'); // check this once output folder config is fully implemented
+        if (!fs.existsSync(premigDir)) {
+            logger.warn(`Premigration backup directory not found at ${premigDir}`);
+            vscode.window.showErrorMessage("Could not find pre-migration backups to restore.");
+            return false;
+        }
+
+        // // Create workspace edit for restoration
+        const restoreEdit = new vscode.WorkspaceEdit();
+        for (const fileUri of pythonFiles) {
+            const relativePath = path.relative(workspacePath, fileUri.fsPath);
+            const backupPath = path.join(premigDir, relativePath);
+            if (fs.existsSync(backupPath)) {
+                try {
+                    const originalContent = fs.readFileSync(backupPath, 'utf-8');
+                    const doc = await vscode.workspace.openTextDocument(fileUri);
+                    const fullRange = new vscode.Range(
+                        new vscode.Position(0, 0),
+                        new vscode.Position(doc.lineCount, 0)
+                    );
+                    restoreEdit.replace(fileUri, fullRange, originalContent);
+                } catch (error) {
+                    logger.warn(`Failed to prepare restoration for ${fileUri.fsPath}: ${error}`);
+                }
+            }
+        }
+
+        // // Apply the edit
+        const restored = await vscode.workspace.applyEdit(restoreEdit);
+        if (restored) {
+            logger.info("Successfully restored files to pre-migration state");
+            // vscode.window.showInformationMessage("Files restored to pre-migration state."); // move this if restore becomes a standalone command
+        } else {
+            logger.error("Failed to restore files");
+            vscode.window.showErrorMessage("Failed to restore files to pre-migration state.");
+        }
+        return restored;
     }
 
     private getWorkspacePath(): string {

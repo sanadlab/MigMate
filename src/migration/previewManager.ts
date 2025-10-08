@@ -42,6 +42,7 @@ export class PreviewManager {
         const fileInfo = new Map<string, { eol: string; endsWithEol: boolean; lineCount: number }>();
         const loadedChanges = migrationState.getChanges();
 
+        logger.info(`Processing ${loadedChanges.length} files with changes for preview`);
         if (loadedChanges.length === 0) {
             vscode.window.showInformationMessage('No changes made during migration');
             return;
@@ -107,7 +108,7 @@ export class PreviewManager {
 
                 // // Standalone add/remove
                 if (!processedHunkIds.has(currentHunk.id)) {
-                    logger.info(`Processing standalone hunk: ${JSON.stringify(currentHunk.type)}`);
+                    // logger.info(`Processing standalone hunk: ${JSON.stringify(currentHunk.type)}`);
                     migrationState.handleSingleHunk(edit, change.uri, currentHunk, eol);
                 }
             }

@@ -8,21 +8,22 @@ import { MigrationChange } from '../services/migrationState';
 
 export class FileProcessor { // update this
     public async findPythonFiles(workspacePath: string): Promise<{ pythonFiles: vscode.Uri[], requirementsFiles: vscode.Uri[] }> {
-        logger.info('Finding Python files in workspace');
+        logger.info('Finding Python files in workspace...');
+        const excludePattern = '{**/.libmig/**,**/node_modules/**,**/.venv/**,**/venv/**,**/.git/**,**/site-packages/**,**/__pycache__/**,**/\\.pytest_cache/**,**/\\.tox/**,**/\\.mypy_cache/**}'
         let pythonFiles = await vscode.workspace.findFiles(
             new vscode.RelativePattern(workspacePath, '**/*.py'),
-            '{**/node_modules/**,**/.venv/**,**/venv/**,**/.git/**,**/site-packages/**,**/__pycache__/**,**/\\.pytest_cache/**,**/\\.tox/**,**/\\.mypy_cache/**}'
+            excludePattern
         );
         pythonFiles = pythonFiles.filter(file => !file.fsPath.endsWith('_run_tests_.py')); // ignore auto-generated file // check this for dupe
 
-        const requirementsFiles = await vscode.workspace.findFiles(new vscode.RelativePattern(workspacePath, '**/requirements.txt'));
+        const requirementsFiles = await vscode.workspace.findFiles(new vscode.RelativePattern(workspacePath, '**/requirements.txt')); // check this
 
         logger.info(`Found ${pythonFiles.length} Python files and ${requirementsFiles.length} requirements files`);
         return { pythonFiles, requirementsFiles };
     }
 
     public copyToTempDir(files: vscode.Uri[], workspacePath: string, tempDir: string): void {
-        logger.info(`Copying ${files.length} files to temporary directory`);
+        logger.info(`Copying ${files.length} files to temporary directory...`);
         for (const fileUri of files) {
             const relativePath = path.relative(workspacePath, fileUri.fsPath);
             const tempFilePath = path.join(tempDir, relativePath);
@@ -34,7 +35,7 @@ export class FileProcessor { // update this
     }
 
     public compareFiles(comparisonFiles: vscode.Uri[], workspacePath: string, comparePath: string, isReversed: boolean = false): Omit<MigrationChange, 'hunks'>[] {
-        logger.info(`Comparing files between workspace and ${isReversed ? 'premigration backup' : 'temporary directory'}`);
+        logger.info(`Comparing files between workspace and ${isReversed ? 'premigration backup' : 'temporary directory'}...`);
         const changes: Omit<MigrationChange, 'hunks'>[] = [];
 
         for (const fileUri of comparisonFiles) {
