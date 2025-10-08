@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { migrationState, MigrationChange } from '../services/migrationState';
+import * as path from 'path';
+import { migrationState, MigrationChange, DiffHunk } from '../services/migrationState';
 import { configService } from '../services/config';
 import { telemetryService } from '../services/telemetry';
 import { codeLensProvider, InlineDiffProvider } from '../providers';
@@ -7,6 +8,11 @@ import { logger } from '../services/logging';
 
 
 
+interface AppliedChange {
+    filePath: string;
+    appliedHunks: number;
+    totalHunks: number;
+}
 
 export class PreviewManager {
     private inlineDiffProvider: InlineDiffProvider;
@@ -21,33 +27,58 @@ export class PreviewManager {
             vscode.window.showInformationMessage('No changes were detected during migration.');
             return;
         }
-
         migrationState.loadChanges(changes);
-        telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib });
 
         // // Show preview based on mode selected in config
         const previewMode = configService.get<string>('flags.previewGrouping');
         logger.info(`Using preview mode: ${previewMode}`);
 
         if (previewMode === 'All at once') {
-            await this.showGroupedPreview();
+            const appliedChanges = await this.showGroupedPreview();
+            if (appliedChanges) {
+                console.log(appliedChanges);
+                const totalApplied = appliedChanges.reduce((sum, change) => sum + change.appliedHunks, 0);
+                const totalOperations = appliedChanges.reduce((sum, change) => sum + change.totalHunks, 0);
+                telemetryService.sendTelemetryEvent('migrationChangesApplied', {
+                    source: srcLib,
+                    target: tgtLib,
+                    appliedOperationCount: totalApplied.toString(),
+                    totalOperationCount: totalOperations.toString(),
+                    fileCount: changes.length.toString(),
+                    appliedFiles: appliedChanges.map(c => path.basename(c.filePath)).join(',')
+                });
+            }
         } else {
             this.showInlinePreview();
         }
     }
 
-    private async showGroupedPreview(): Promise<void> {
+    private async showGroupedPreview(): Promise<AppliedChange[] | undefined> {
         telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'grouped' });
         const edit = new vscode.WorkspaceEdit();
         const fileInfo = new Map<string, { eol: string; endsWithEol: boolean; lineCount: number }>();
         const loadedChanges = migrationState.getChanges();
+        const pairedHunks = new Map<number, number>();
 
         logger.info(`Processing ${loadedChanges.length} files with changes for preview`);
         if (loadedChanges.length === 0) {
             vscode.window.showInformationMessage('No changes made during migration');
-            return;
+            return undefined;
         }
 
+        // // Save content just before going to the preview
+        const beforeContent = new Map<string, string>();
+        for (const change of loadedChanges) {
+            const uri = change.uri;
+            try {
+                const doc = await vscode.workspace.openTextDocument(uri);
+                beforeContent.set(uri.fsPath, doc.getText());
+            } catch (error) {
+                logger.warn(`Failed to read content before applying changes: ${error}`);
+            }
+        }
+
+        // // Convert the detected changes for use in Refactor Preview
         for (const change of loadedChanges) {
             // // Keep track of EOL/EOF characters for each file being changed
             const key = change.uri.toString();
@@ -100,6 +131,7 @@ export class PreviewManager {
                             needsConfirmation: true,
                         };
                         edit.replace(change.uri, range, newText, metadata);
+                        pairedHunks.set(currentHunk.id, nextHunk.id);
                         processedHunkIds.add(currentHunk.id);
                         processedHunkIds.add(nextHunk.id);
                         continue;
@@ -114,13 +146,90 @@ export class PreviewManager {
             }
         }
 
-        await vscode.workspace.applyEdit(edit, { isRefactoring: true });
+        // // Apply changes and show preview
+        const success = await vscode.workspace.applyEdit(edit, { isRefactoring: true });
+        if (!success) {
+            logger.warn("User cancelled migration, or preview failed to apply.");
+            migrationState.clear();
+            return undefined;
+        }
+        await new Promise(resolve => setTimeout(resolve, 200)); // wait for file sync
+
+        // // Check applied changes against initial
+        logger.info('Analyzing applied changes for telemetry...');
+        const appliedChanges: AppliedChange[] = [];
+        for (const change of loadedChanges) {
+            const uri = change.uri;
+            const filePath = uri.fsPath;
+            const hunks = migrationState.getHunks(uri);
+            try {
+                const doc = await vscode.workspace.openTextDocument(uri);
+                const afterContent = doc.getText();
+                const beforeText = beforeContent.get(filePath) ?? '';
+                if (beforeText === afterContent) {continue;} // skip file if before & after match
+
+                // // Track analyzed hunks
+                const processedAnalysisHunks = new Set<number>();
+                let appliedHunkCount = 0;
+
+                for (const hunk of hunks) {
+                    if (processedAnalysisHunks.has(hunk.id)) {continue;}
+                    let wasApplied = false;
+                    const pairedId = pairedHunks.get(hunk.id);
+
+                    // // Part of a replacement
+                    if (pairedId) {
+                        const pairedHunk = hunks.find(h => h.id === pairedId);
+                        if (pairedHunk) {
+                            if (this.isHunkApplied(hunk, beforeText, afterContent) && this.isHunkApplied(pairedHunk, beforeText, afterContent)) {
+                                wasApplied = true;
+                                logger.info(`Detected applied replacement at line ${hunk.originalStartLine + 1}`);
+                            }
+                            processedAnalysisHunks.add(pairedHunk.id);
+                        }
+                    }
+                    // // Standalone change
+                    else {
+                        wasApplied = this.isHunkApplied(hunk, beforeText, afterContent);
+                        if (wasApplied) {
+                            logger.info(`Detected applied ${hunk.type} at line ${hunk.originalStartLine + 1}`);
+                        }
+                    }
+
+                    if (wasApplied) {
+                        appliedHunkCount++;
+                    }
+                    processedAnalysisHunks.add(hunk.id);
+                }
+
+                if (appliedHunkCount > 0) {
+                    let pairsInFile = 0;
+                    for (const hunk of hunks) {
+                        if (pairedHunks.has(hunk.id)) {
+                            pairsInFile++;
+                        }
+                    }
+                    const totalOperationsInFile = hunks.length - pairsInFile;
+                    logger.info(`Detected ${appliedHunkCount}/${totalOperationsInFile} applied operations in ${path.basename(filePath)}`);
+                    appliedChanges.push({
+                        filePath,
+                        appliedHunks: appliedHunkCount,
+                        totalHunks: totalOperationsInFile
+                    });
+                }
+            } catch (error) {
+                logger.warn(`Failed to analyze changes for ${path.basename(filePath)}: ${error}`);
+            }
+        }
+
+        // // Clean everything up
         migrationState.clear();
         codeLensProvider.refresh();
         const editor = vscode.window.activeTextEditor;
         if (editor) {
             this.inlineDiffProvider.clearDecorations(editor);
         }
+        return appliedChanges;
     }
 
     private showInlinePreview(): void { // leave for now, might remove // check this
@@ -132,4 +241,46 @@ export class PreviewManager {
         });
         codeLensProvider.refresh();
     }
+
+    private isHunkApplied(hunk: DiffHunk, beforeContent: string, afterContent: string): boolean {
+        const hunkContent = hunk.lines.join('\n');
+        if (hunk.type === 'added') {
+            return afterContent.includes(hunkContent);
+        }
+        if (hunk.type === 'removed') {
+            return beforeContent.includes(hunkContent) && !afterContent.includes(hunkContent);
+            // // // Get the surrounding lines
+            // const beforeLines = beforeContent.split('\n');
+            // const contextBefore = beforeLines[hunk.originalStartLine - 1] || '';
+            // const contextAfter = beforeLines[hunk.originalStartLine + hunk.lines.length] || '';
+            // if (contextBefore || contextAfter) {
+            //     const pattern = [contextBefore, ...hunk.lines, contextAfter].filter(line => line).join('\n');
+            //     return !afterContent.includes(pattern);
+            // }
+            // return !afterContent.includes(hunkContent);
+        }
+        return false;
+    }
+
+    // private async showCustomGranularPreview(changes: Omit<MigrationChange, 'hunks'>[]): Promise<void> {
+    //     const panel = vscode.window.createWebviewPanel(
+    //         'migrationPreview',
+    //         'Migration Preview',
+    //         vscode.ViewColumn.Beside,
+    //         { enableScripts: true }
+    //     );
+    //     panel.webview.html = this.generateChangePreviewHtml(changes);
+
+    //     panel.webview.onDidReceiveMessage(async message => {
+    //         if (message.command === 'applyChange') {
+    //             const changeId = message.changeId;
+    //             const change = migrationState.getChangeById(changeId);
+    //             if (change) {
+    //                 const edit = new vscode.WorkspaceEdit();
+    //                 await vscode.workspace.applyEdit(edit);
+    //                 panel.webview.postMessage({ command: 'changeApplied', changeId });
+    //             }
+    //         }
+    //     });
+    // }
 }

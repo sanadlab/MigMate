@@ -19,6 +19,7 @@ export class MigrationService {
     private fileProcessor: FileProcessor;
     private migrationExecutor: MigrationExecutor;
     private previewManager: PreviewManager;
+    private activeMigration: boolean = false;
 
     constructor(private context: vscode.ExtensionContext) {
         this.environmentManager = new EnvironmentManager();
@@ -28,10 +29,17 @@ export class MigrationService {
     }
 
     public async runMigration(hoverLibrary?: string): Promise<void> {
+        if (this.activeMigration) {
+            logger.warn("Migration triggered while another migration is already running");
+            vscode.window.showInformationMessage("A migration is already in progress.");
+            return;
+        }
+
         logger.info('Migration process started');
         telemetryService.sendTelemetryEvent('migrationStarted', { trigger: hoverLibrary ? 'hover' : 'commandPalette' });
 
         try {
+            this.activeMigration = true;
             const workspacePath = this.getWorkspacePath();
             const { srcLib, tgtLib } = await this.selectLibraries(hoverLibrary);
 
@@ -47,6 +55,9 @@ export class MigrationService {
             logger.error('Migration failed', err);
             telemetryService.sendTelemetryErrorEvent('migrationError', { error: err.message });
             vscode.window.showErrorMessage(`Migration failed: ${err.message}`);
+        }
+        finally {
+            this.activeMigration = false;
         }
     }
 
