@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { logger } from './logging';
 
+let currentPanel: vscode.WebviewPanel | undefined = undefined;
+
 interface MigrationDetails {
     repoName: string;
     sourceLib: string;
@@ -228,14 +230,47 @@ function getMigrationDetails(libmigDir: string): MigrationDetails | undefined {
 
 // // Show test results in a WebView panel
 export function showTestResultsDetail(results: TestResults): void {
-    // // Create and show a webview
-    const panel = vscode.window.createWebviewPanel(
+    const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
+
+    // // Show existing webview panel
+    if (currentPanel) {
+        currentPanel.reveal(column);
+        currentPanel.webview.html = generateTestResultsHtml(results);
+        return;
+    }
+
+    // // Create and show new webview
+    currentPanel = vscode.window.createWebviewPanel(
         'libmigTestResults',
         'Migration Test Results',
-        vscode.ViewColumn.One,
+        column || vscode.ViewColumn.One,
         { enableScripts: true }
     );
-    panel.webview.html = generateTestResultsHtml(results);
+    currentPanel.webview.html = generateTestResultsHtml(results);
+
+    // // Triggers
+    currentPanel.onDidDispose(() => {currentPanel = undefined;}, null);
+    currentPanel.webview.onDidReceiveMessage(
+        async message => {
+            switch(message.command) {
+                case 'jumpToFile':
+                    try {
+                        const workspaceFolders = vscode.workspace.workspaceFolders;
+                        if (!workspaceFolders) {
+                            logger.error(`Failed to open file from webview: No open workspace`);
+                            vscode.window.showErrorMessage("Cannot jump to file, no workspace is open.");
+                            return;
+                        }
+                        const workspaceRoot = workspaceFolders[0].uri;
+                        const fileUri = vscode.Uri.joinPath(workspaceRoot, message.filepath);
+                        await vscode.window.showTextDocument(fileUri, { preview: false });
+                    } catch (error) {
+                        logger.error(`Failed to open file from webview: ${error}`);
+                        vscode.window.showErrorMessage(`Could not open file: ${message.filepath}`);
+                    }
+            }
+        }
+    );
 }
 
 // // Generate HTML for displaying test results
@@ -250,7 +285,6 @@ function generateTestResultsHtml(results: TestResults): string {
         // const targetText = details.versions?.target
         //     ? `${details.targetLib} (${details.versions.target})`
         //     : details.targetLib;
-        // <h3>Migration Details</h3>
         migrationInfoHtml = `
         <div class="migration-info">
             <div class="info-grid">
@@ -297,15 +331,17 @@ function generateTestResultsHtml(results: TestResults): string {
 
     let failuresHtml = '';
     results.failures.forEach(failure => {
+        const failureId = `failure-${failure.round}-${failure.file}-${failure.name}`.replace(/[^a-zA-Z0-9-_]/g, '-');
         failuresHtml += `
-            <div class="failure">
-                <div class="failure-header">
+            <details id="${failureId}" class="failure" open>
+                <summary class="failure-header">
                     <span class="failure-round">${formatRoundName(failure.round)}</span>
                     <span class="failure-file">${failure.file}</span>
                     <span class="failure-name">${failure.name}</span>
-                </div>
+                    <button class="jump-button" data-filepath="${escapeHtml(failure.file)}">Go</button>
+                </summary>
                 <pre class="failure-message">${escapeHtml(failure.message)}</pre>
-            </div>
+            </details>
         `;
     });
 
@@ -378,20 +414,33 @@ function generateTestResultsHtml(results: TestResults): string {
             }
             .failure-header {
                 display: flex;
-                margin-bottom: 10px;
+                margin-bottom: 5px;
                 align-items: center;
+                gap: 5px;
+                cursor: pointer;
+                list-style: none;
+            }
+            .failure-header::-webkit-details-marker {
+                display: none;
+            }
+            .failure-header::before {
+                content: '▶';
+                font-size: 0.8em;
+                transition: transform 0.1s ease-in-out;
+            }
+            .failure[open] > .failure-header::before {
+                transform: rotate(90deg);
             }
             .failure-round {
                 background: var(--vscode-badge-background, #444);
                 color: var(--vscode-badge-foreground, #fff);
                 padding: 2px 6px;
                 border-radius: 3px;
-                margin-right: 10px;
                 font-size: 0.95em;
             }
             .failure-file {
                 color: var(--vscode-descriptionForeground, #aaa);
-                margin-right: 10px;
+                margin-right: auto;
                 font-size: 0.95em;
             }
             .failure-name {
@@ -406,7 +455,21 @@ function generateTestResultsHtml(results: TestResults): string {
                 overflow-x: auto;
                 font-size: 0.98em;
                 border: 1px solid var(--vscode-panel-border, #444);
+                margin-top: 10px;
             }
+            .jump-button {
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: 1px solid var(--vscode-button-border, transparent);
+                border-radius: 3px;
+                padding: 3px 12px;
+                cursor: pointer;
+                font-size: 0.9em;
+            }
+            .jump-button:hover {
+                background: var(--vscode-button-hoverBackground);
+            }
+
             .log {
                 margin-top: 30px;
                 padding: 15px;
@@ -418,6 +481,7 @@ function generateTestResultsHtml(results: TestResults): string {
                 color: var(--vscode-editor-foreground, #eee);
                 border: 1px solid var(--vscode-panel-border, #444);
             }
+
             .migration-info {
                 background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background, #222));
                 border: 1px solid var(--vscode-panel-border, #444);
@@ -426,29 +490,24 @@ function generateTestResultsHtml(results: TestResults): string {
                 margin-bottom: 20px;
                 box-shadow: 0 1px 4px 0 rgba(0,0,0,0.07);
             }
-
             .migration-info h3 {
                 margin-top: 0;
                 margin-bottom: 10px;
                 color: var(--vscode-editor-foreground);
             }
-
             .info-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
                 grid-gap: 10px;
             }
-
             .info-item {
                 display: flex;
                 flex-direction: column;
             }
-
             .info-label {
                 font-size: 0.9em;
                 color: var(--vscode-descriptionForeground, #aaa);
             }
-
             .info-value {
                 font-weight: bold;
                 color: var(--vscode-editor-foreground);
@@ -473,8 +532,8 @@ function generateTestResultsHtml(results: TestResults): string {
         </div>
 
         ${results.failureCount > 0 ? `
+            <h3>Test Failures</h3>
             <div class="failures">
-                <h3>Test Failures</h3>
                 ${failuresHtml}
             </div>
         ` : ''}
@@ -483,6 +542,40 @@ function generateTestResultsHtml(results: TestResults): string {
             <h3>Migration Log</h3>
             <div class="log">${escapeHtml(results.logContent)}</div>
         ` : ''}
+
+        <script>
+            const vscode = acquireVsCodeApi();
+            const previousState = vscode.getState() || { openStates: {} };
+            document.addEventListener('DOMContentLoaded', function () {
+                document.querySelectorAll('details.failure').forEach(detailsElement => {
+                    // // Close failure details based on previous state
+                    const id = detailsElement.id;
+                    if (!id) return;
+                    if (previousState.openStates[id] === false) {
+                        detailsElement.removeAttribute('open');
+                    }
+                    // // Save the new toggle state
+                    detailsElement.addEventListener('toggle', (event) => {
+                        previousState.openStates[id] = detailsElement.open;
+                        vscode.setState(previousState);
+                    });
+                });
+
+                // // Add listeners for jump buttons
+                document.querySelectorAll('.jump-button').forEach(button => {
+                    button.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        const filepath = button.getAttribute('data-filepath');
+                        if (filepath) {
+                            vscode.postMessage({
+                                command: 'jumpToFile',
+                                filepath: filepath
+                            });
+                        }
+                    });
+                });
+            });
+        </script>
     </body>
     </html>`;
 }
