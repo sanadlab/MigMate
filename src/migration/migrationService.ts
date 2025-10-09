@@ -35,36 +35,47 @@ export class MigrationService {
             return;
         }
 
+        this.activeMigration = true;
         logger.info('Migration process started');
         telemetryService.sendTelemetryEvent('migrationStarted', { trigger: hoverLibrary ? 'hover' : 'commandPalette' });
 
-        try {
-            this.activeMigration = true;
-            const workspacePath = this.getWorkspacePath();
-            const { srcLib, tgtLib } = await this.selectLibraries(hoverLibrary);
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Library Migration",
+            cancellable: false // check this
+        }, async (progress) => {
+            try {
+                progress.report({ message: "Initializing...", increment: 5 });
+                const workspacePath = this.getWorkspacePath();
 
-            const useTempDirectory = configService.get<boolean>('options.useTempDirectory');
-            logger.info(`Migration mode: ${useTempDirectory ? 'Temp' : 'Direct'}`);
-            if (useTempDirectory) {
-                await this.runTempMigration(workspacePath, srcLib, tgtLib);
-            } else {
-                await this.runDirectMigration(workspacePath, srcLib, tgtLib);
+                progress.report({ message: "Selecting libraries...", increment: 5 });
+                const { srcLib, tgtLib } = await this.selectLibraries(hoverLibrary);
+
+                const useTempDirectory = configService.get<boolean>('options.useTempDirectory');
+                logger.info(`Migration mode: ${useTempDirectory ? 'Temp' : 'Direct'}`);
+                if (useTempDirectory) {
+                    await this.runTempMigration(workspacePath, srcLib, tgtLib, progress);
+                } else {
+                    await this.runDirectMigration(workspacePath, srcLib, tgtLib, progress);
+                }
+                progress.report({ message: "Done.", increment: 10 });
+            } catch (error) {
+                const err = error as Error;
+                logger.error('Migration failed', err);
+                telemetryService.sendTelemetryErrorEvent('migrationError', { error: err.message });
+                vscode.window.showErrorMessage(`Migration failed: ${err.message}`);
             }
-        } catch (error) {
-            const err = error as Error;
-            logger.error('Migration failed', err);
-            telemetryService.sendTelemetryErrorEvent('migrationError', { error: err.message });
-            vscode.window.showErrorMessage(`Migration failed: ${err.message}`);
-        }
-        finally {
-            this.activeMigration = false;
-        }
+            finally {
+                this.activeMigration = false;
+            }
+        });
     }
 
-    private async runTempMigration(workspacePath: string, srcLib: string, tgtLib: string): Promise<void> {
+    private async runTempMigration(workspacePath: string, srcLib: string, tgtLib: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
         const tempDir = await this.environmentManager.createTempDirectory();
         try {
             // // Copy the files over to temp directory
+            progress.report({ message: "Copying files...", increment: 20 });
             const { pythonFiles, requirementsFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
             this.fileProcessor.copyToTempDir(
                 [...pythonFiles, ...requirementsFiles],
@@ -73,7 +84,9 @@ export class MigrationService {
             );
             this.environmentManager.initGitRepository(tempDir); // check this
             // // Perform the migration and check for test failures
+            progress.report({ message: `Migrating from ${srcLib} to ${tgtLib}...`, increment: 30 });
             await this.migrationExecutor.executeMigration(srcLib, tgtLib, tempDir);
+            progress.report({ message: "Checking test results...", increment: 10 });
             const testResults = await checkTestResults(tempDir);
             if (testResults.hasFailures) {
                 const viewDetailsAction = 'View Details';
@@ -86,9 +99,11 @@ export class MigrationService {
                 }
             }
             // // Compare files and show preview
+            progress.report({ message: "Analyzing changes...", increment: 10 });
             const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, tempDir, false);
-            await this.previewManager.showChanges(changes, srcLib, tgtLib);
             this.environmentManager.saveResultsPath(this.context, tempDir);
+            progress.report({ message: "Generating preview...", increment: 10 });
+            await this.previewManager.showChanges(changes, srcLib, tgtLib);
             logger.info('Migration process completed successfully (temp)');
             telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, mode: 'temp', changesFound: changes.length.toString() });
         } catch (error) {
@@ -97,14 +112,16 @@ export class MigrationService {
         }
     }
 
-    private async runDirectMigration(workspacePath: string, srcLib: string, tgtLib: string): Promise<void> {
+    private async runDirectMigration(workspacePath: string, srcLib: string, tgtLib: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
         logger.info(`Running migration directly on workspace: ${workspacePath}`);
         try {
             // // Save Python filepaths before migration
             const { pythonFiles, requirementsFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
+            progress.report({ message: `Migrating from ${srcLib} to ${tgtLib}...`, increment: 30 });
             await this.migrationExecutor.executeMigration(srcLib, tgtLib, workspacePath);
 
             // // Check for test failures
+            progress.report({ message: "Checking test results...", increment: 10 });
             const testResults = await checkTestResults(workspacePath);
             if (testResults.hasFailures) {
                 const viewDetailsAction = 'View Details';
@@ -140,6 +157,7 @@ export class MigrationService {
             }
 
             // // Restore original files (WIP) // is this better than saving pre-mig content in memory?
+            progress.report({ message: "Restoring original files...", increment: 20 });
             const restored = await this.restoreFromBackup(workspacePath);
             if (!restored) {
                 logger.warn("Failed to restore original files");
@@ -148,6 +166,7 @@ export class MigrationService {
             }
 
             // // Compare files against stored content
+            progress.report({ message: "Analyzing changes...", increment: 10 });
             const changes: Omit<MigrationChange, 'hunks'>[] = [];
             for (const fileUri of pythonFiles) {
                 const filePath = fileUri.fsPath;
@@ -171,6 +190,7 @@ export class MigrationService {
             console.log("Changes:", changes);
             // // Save results and show preview
             this.environmentManager.saveResultsPath(this.context, path.join(workspacePath, '.libmig')); // consider renaming // check this
+            progress.report({ message: "Generating preview...", increment: 10 });
             await this.previewManager.showChanges(changes, srcLib, tgtLib);
 
             logger.info('Migration process completed successfully (direct)');

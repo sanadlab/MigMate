@@ -278,7 +278,6 @@ function generateTestResultsHtml(results: TestResults): string {
     let migrationInfoHtml = '';
     if (results.migrationDetails) {
         const details = results.migrationDetails;
-        console.log(details);
         // const sourceText = details.versions?.source
         //     ? `${details.sourceLib} (${details.versions.source})`
         //     : details.sourceLib;
