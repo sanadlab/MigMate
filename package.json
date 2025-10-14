@@ -1,7 +1,7 @@
 {
   "name": "libmig-prototype",
   "displayName": "LibMig",
-  "description": "A (prototype) plugin for LibMig",
+  "description": "A prototype plugin that enables automated Python library migration.",
   "license": "SEE LICENSE IN LICENSE",
   "version": "0.0.1",
   "engines": {
@@ -10,13 +10,27 @@
   "categories": [
     "Other"
   ],
+  "keywords": [
+    "python", "library migration", "migration", "refactoring", "llm", "automation"
+  ],
+  "pricing": "Free",
+  "icon": "128x128",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/your-repo.git"
+  },
+  "homepage": "https://github.com/your-username/your-repo/blob/main/README.md",
+
+
+
+
+  "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:python",
     "onLanguage:pip-requirements",
     "workspaceContains:**/requirements*.txt",
     "workspaceContains:pyproject.toml"
   ],
-  "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
@@ -27,6 +41,11 @@
       {
         "command": "libmig.viewTestResults",
         "title": "View migration test results",
+        "category": "LibMig"
+      },
+      {
+        "command": "libmig.viewWebview",
+        "title": "Show Migration Webview",
         "category": "LibMig"
       },
       {
@@ -93,18 +112,24 @@
           "libmig.flags.LLMClient": {
             "type": "string",
             "enum": [
-              "openai",
-              "claude",
-              "gemini"
+              "gpt-4o-mini",
+              "gpt-4o",
+              "gpt-4.1"
             ],
-            "default": "openai",
+            "default": "gpt-4o-mini",
             "description": "Select an LLM client to use for migrations"
           },
           "libmig.options.previewGrouping": {
             "type": "string",
             "enum": [
               "One-by-one",
-              "All at once"
+              "All at once",
+              "webview"
+            ],
+            "enumDescriptions": [
+              "View files one-at-a-time",
+              "Use VS Code's built-in Refactor Preview",
+              "Use an experimental webview"
             ],
             "default": "One-by-one",
             "description": "Choose how migrated files are shown during preview"
@@ -117,9 +142,11 @@
             "enum": [
               "premig",
               "llmmig",
-              "postmig"
+              "merge_skipped",
+              "async_transform"
             ],
-            "default": [],
+            "uniqueItems": true,
+            "default": ["premig", "llmmig", "merge_skipped", "async_transform"],
             "description": "Specify which migration rounds should be run"
           },
           "libmig.flags.pythonVersion": {

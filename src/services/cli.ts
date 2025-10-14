@@ -61,7 +61,9 @@ export function buildCliCommand(srcLib: string, tgtLib: string): string {
             }
             else if (currentValue !== '') { // ignore empty strings
                 if (Array.isArray(currentValue) && currentValue.length > 0) { // currently only for migrationRounds // check this to see Integer vs Array
-                    commandParts.push(`${cliFlag}=${currentValue.join(',')}`);
+                    currentValue.forEach(subValue => {
+                        commandParts.push(`${cliFlag}=${subValue}`);
+                    });
                 }
                 else if (!Array.isArray(currentValue)) { // check if this is fine for all string config options
                     commandParts.push(`${cliFlag}=${currentValue}`);
