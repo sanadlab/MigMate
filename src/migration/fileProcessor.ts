@@ -34,8 +34,8 @@ export class FileProcessor { // update this
         logger.info('Files copied successfully');
     }
 
-    public compareFiles(comparisonFiles: vscode.Uri[], workspacePath: string, comparePath: string, isReversed: boolean = false): Omit<MigrationChange, 'hunks'>[] {
-        logger.info(`Comparing files between workspace and ${isReversed ? 'premigration backup' : 'temporary directory'}...`);
+    public compareFiles(comparisonFiles: vscode.Uri[], workspacePath: string, comparePath: string): Omit<MigrationChange, 'hunks'>[] {
+        logger.info(`Comparing files in workspace ${workspacePath} against migrated copies in: ${comparePath}`);
         const changes: Omit<MigrationChange, 'hunks'>[] = [];
 
         for (const fileUri of comparisonFiles) {
@@ -43,6 +43,8 @@ export class FileProcessor { // update this
 
             const relativePath = path.relative(workspacePath, fileUri.fsPath);
             const compareFilePath = path.join(comparePath, relativePath);
+            // console.log(`Comparing original '${relativePath}' to migrated '${compareFilePath}'`);
+
 
             if (!fs.existsSync(compareFilePath)) {continue;}
 
@@ -58,8 +60,8 @@ export class FileProcessor { // update this
             }
 
             // // Assign original and updated
-            const originalContent = isReversed ? compareContent : workspaceContent;
-            const updatedContent = isReversed ? workspaceContent : compareContent;
+            const originalContent = workspaceContent;
+            const updatedContent = compareContent;
             if (originalContent !== updatedContent) {
                 changes.push({
                     uri: fileUri,

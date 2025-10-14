@@ -100,7 +100,7 @@ export class MigrationService {
             }
             // // Compare files and show preview
             progress.report({ message: "Analyzing changes...", increment: 10 });
-            const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, tempDir, false);
+            const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, tempDir);
             this.environmentManager.saveResultsPath(this.context, tempDir);
             progress.report({ message: "Generating preview...", increment: 10 });
             await this.previewManager.showChanges(changes, srcLib, tgtLib);
@@ -115,8 +115,15 @@ export class MigrationService {
     private async runDirectMigration(workspacePath: string, srcLib: string, tgtLib: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
         logger.info(`Running migration directly on workspace: ${workspacePath}`);
         try {
+            // // Check for git repository in workspace (CLI also checks, but fails silently?)
+            const isRepo = await this.environmentManager.checkGitRepository(workspacePath);
+            if(!isRepo) {
+                logger.error('No git repository found in workspace');
+                throw new Error('Current workspace is not a Git repository. Please initialize Git first.');
+            }
+
             // // Save Python filepaths before migration
-            const { pythonFiles, requirementsFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
+            const { pythonFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
             progress.report({ message: `Migrating from ${srcLib} to ${tgtLib}...`, increment: 30 });
             await this.migrationExecutor.executeMigration(srcLib, tgtLib, workspacePath);
 
@@ -134,62 +141,39 @@ export class MigrationService {
                 }
             }
 
-            // // Check the unmodified copy under `.libmig/0-premig/files` folder
-            const premigDir = path.join(workspacePath, '.libmig', '0-premig', 'files'); // check this once output folder config is fully implemented
-            if (!fs.existsSync(premigDir)) {
-                logger.warn(`Premigration backup directory not found at ${premigDir}`);
-                vscode.window.showWarningMessage("Could not find backup files in output directory.");
-                return;
-            }
+            // // Check output folder for saved files (start from later rounds) // check this
+            const outputDir = path.join(workspacePath, '.libmig'); // check this
+            const roundFolders = ['0-premig', '1-llmmig', '2-merge_skipped', '3-async_transform']; // consider making a constant, maybe use for config enum as well
+            let migratedFilesDir: string | undefined;
 
-            // // Store migrated content in memory (WIP)
-            const migratedContent = new Map<string, string>();
-            for (const fileUri of pythonFiles) {
-                try {
-                    const filePath = fileUri.fsPath;
-                    if (fs.existsSync(filePath)) {
-                        migratedContent.set(filePath, fs.readFileSync(filePath, 'utf-8'));
-                        // logger.info(`Stored migrated content for ${path.basename(filePath)}`);
-                    }
-                } catch (error) {
-                    logger.warn(`Failed to read migrated content: ${error}`);
+            for (let i = roundFolders.length - 1; i >= 0; i--) {
+                const folder = roundFolders[i];
+                const potentialDir = path.join(outputDir, folder, 'files');
+                if (fs.existsSync(potentialDir)) {
+                    migratedFilesDir = potentialDir;
+                    logger.info(`Found latest migration output at ${potentialDir}`);
+                    break; // check this // not sure if subsequent CLI calls remove round folders and start fresh
                 }
             }
 
-            // // Restore original files (WIP) // is this better than saving pre-mig content in memory?
-            progress.report({ message: "Restoring original files...", increment: 20 });
-            const restored = await this.restoreFromBackup(workspacePath);
-            if (!restored) {
-                logger.warn("Failed to restore original files");
-                vscode.window.showWarningMessage("Failed to restore original files for preview.");
-                return;
-            }
+            if (!migratedFilesDir) {
+                    logger.warn(`Migrated files not found in ${outputDir}`);
+                    vscode.window.showWarningMessage("Migrated files not found. Cannot show preview.");
+                    await this.environmentManager.gitResetHard(workspacePath); // always perform git reset
+                    return;
+                }
 
-            // // Compare files against stored content
+            // // Restore original files // is this better than saving pre-mig content in memory?
+            progress.report({ message: "Restoring workspace to original state...", increment: 20 });
+            await this.environmentManager.gitResetHard(workspacePath);
+
+            // // Compare original files against migrated copies
             progress.report({ message: "Analyzing changes...", increment: 10 });
-            const changes: Omit<MigrationChange, 'hunks'>[] = [];
-            for (const fileUri of pythonFiles) {
-                const filePath = fileUri.fsPath;
-                if (migratedContent.has(filePath)) {
-                    try {
-                        const doc = await vscode.workspace.openTextDocument(fileUri);
-                        const originalContent = doc.getText();
-                        const updatedContent = migratedContent.get(filePath)!;
-                        if (originalContent !== updatedContent) {
-                            changes.push({
-                                uri: fileUri,
-                                originalContent,
-                                updatedContent
-                            });
-                        }
-                    } catch (error) {
-                        logger.warn(`Failed to build changes for ${fileUri.fsPath}: ${error}`);
-                    }
-                }
-            }
+            const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, migratedFilesDir);
             console.log("Changes:", changes);
+
             // // Save results and show preview
-            this.environmentManager.saveResultsPath(this.context, path.join(workspacePath, '.libmig')); // consider renaming // check this
+            this.environmentManager.saveResultsPath(this.context, outputDir);
             progress.report({ message: "Generating preview...", increment: 10 });
             await this.previewManager.showChanges(changes, srcLib, tgtLib);
 
@@ -197,52 +181,14 @@ export class MigrationService {
             telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, mode: 'direct', changesFound: changes.length.toString() });
         } catch (error) {
             logger.error('Error during migration process (direct)', error as Error);
+            try {
+                await this.environmentManager.gitResetHard(workspacePath);
+                logger.info('Succesfully reset workspace after direct migration error');
+            } catch (gitError) {
+                logger.error('Failed to revert workspace after direct migration error');
+            }
             throw error;
         }
-    }
-
-    public async restoreFromBackup(workspacePath: string): Promise<boolean> {
-        logger.info("Restoring files to pre-migration state...");
-        const { pythonFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
-
-        // // Check the unmodified copies under `.libmig/0-premig/files` folder
-        const premigDir = path.join(workspacePath, '.libmig', '0-premig', 'files'); // check this once output folder config is fully implemented
-        if (!fs.existsSync(premigDir)) {
-            logger.warn(`Premigration backup directory not found at ${premigDir}`);
-            vscode.window.showErrorMessage("Could not find pre-migration backups to restore.");
-            return false;
-        }
-
-        // // Create workspace edit for restoration
-        const restoreEdit = new vscode.WorkspaceEdit();
-        for (const fileUri of pythonFiles) {
-            const relativePath = path.relative(workspacePath, fileUri.fsPath);
-            const backupPath = path.join(premigDir, relativePath);
-            if (fs.existsSync(backupPath)) {
-                try {
-                    const originalContent = fs.readFileSync(backupPath, 'utf-8');
-                    const doc = await vscode.workspace.openTextDocument(fileUri);
-                    const fullRange = new vscode.Range(
-                        new vscode.Position(0, 0),
-                        new vscode.Position(doc.lineCount, 0)
-                    );
-                    restoreEdit.replace(fileUri, fullRange, originalContent);
-                } catch (error) {
-                    logger.warn(`Failed to prepare restoration for ${fileUri.fsPath}: ${error}`);
-                }
-            }
-        }
-
-        // // Apply the edit
-        const restored = await vscode.workspace.applyEdit(restoreEdit);
-        if (restored) {
-            logger.info("Successfully restored files to pre-migration state");
-            // vscode.window.showInformationMessage("Files restored to pre-migration state."); // move this if restore becomes a standalone command
-        } else {
-            logger.error("Failed to restore files");
-            vscode.window.showErrorMessage("Failed to restore files to pre-migration state.");
-        }
-        return restored;
     }
 
     private getWorkspacePath(): string {
