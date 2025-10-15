@@ -170,7 +170,7 @@ export class MigrationService {
             // // Compare original files against migrated copies
             progress.report({ message: "Analyzing changes...", increment: 10 });
             const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, migratedFilesDir);
-            console.log("Changes:", changes);
+            console.log("File comparison:", changes);
 
             // // Save results and show preview
             this.environmentManager.saveResultsPath(this.context, outputDir);
