@@ -45,19 +45,20 @@ export class MigrationWebview {
                         this.panel?.dispose();
                         break;
 
-                    case 'viewDiff': // check this
-                        // // Current (jumps to file, code incorrectly labels it as viewDiff)
+                    case 'jumpToFile':
                         const uri = vscode.Uri.file(message.filePath);
                         const document = await vscode.workspace.openTextDocument(uri);
                         await vscode.window.showTextDocument(document);
-                        // // // Alt (actually show diff)
-                        // const originalUri = vscode.Uri.file(message.filePath);
-                        // const change = migrationState.getChange(originalUri);
-                        // if (change) {
-                        //     const updatedUri = vscode.Uri.parse(`libmig-preview:${originalUri.fsPath}`);
-                        //     const title = `${path.basename(originalUri.fsPath)} (Original ↔ Migrated)`;
-                        //     await vscode.commands.executeCommand('vscode.diff', originalUri, updatedUri, title);
-                        // }
+                        break;
+
+                    case 'viewDiff': // check this
+                        const originalUri = vscode.Uri.file(message.filePath);
+                        const change = migrationState.getChange(originalUri);
+                        if (change) {
+                            const updatedUri = vscode.Uri.parse(`libmig-preview:${originalUri.fsPath}`);
+                            const title = `${path.basename(originalUri.fsPath)} (Original ↔ Migrated)`;
+                            await vscode.commands.executeCommand('vscode.diff', originalUri, updatedUri, title);
+                        }
                         break;
 
                     case 'applySingleChange':
@@ -236,7 +237,11 @@ export class MigrationWebview {
                 flex-grow: 1;
                 font-weight: bold;
             }
-            .view-diff-button {
+            .file-header-buttons {
+                display: flex;
+                gap: 5px;
+            }
+            .jump-to-file-button, .view-diff-button {
                 background: var(--vscode-button-secondaryBackground);
                 color: var(--vscode-button-secondaryForeground);
                 border: none;
@@ -349,7 +354,10 @@ export class MigrationWebview {
             <div class="file-header">
                 <input type="checkbox" class="file-checkbox" data-file-index="${fileIndex}" checked>
                 <span class="file-path">${path.basename(change.uri.fsPath)}</span>
-                <button class="view-diff-button" data-file-path="${change.uri.fsPath}">View File</button>
+                <div class="file-header-buttons">
+                    <button class="jump-to-file-button" data-file-path="${change.uri.fsPath}">View File</button>
+                    <button class="view-diff-button" data-file-path="${change.uri.fsPath}">View Diff</button>
+                </div>
             </div>
             <div class="hunks">
                 ${hunksHtml}
@@ -380,7 +388,7 @@ export class MigrationWebview {
 
     private generateButtons(): string {
         return `<div class="buttons">
-            <button class="cancel-button">Cancel</button>
+            <button class="cancel-button">Close Preview</button>
             <button class="apply-button">Apply Selected Changes</button>
         </div>`;
     }
@@ -450,6 +458,17 @@ export class MigrationWebview {
 
                         // // Update the global select-all checkbox
                         updateSelectAllState();
+                    });
+                });
+
+                // // Handle jump to file buttons
+                document.querySelectorAll('.jump-to-file-button').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const filePath = button.getAttribute('data-file-path');
+                        vscode.postMessage({
+                            command: 'jumpToFile',
+                            filePath
+                        });
                     });
                 });
 
