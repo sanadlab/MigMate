@@ -40,7 +40,7 @@
       },
       {
         "command": "libmig.viewTestResults",
-        "title": "View migration test results",
+        "title": "View Migration Test Results",
         "category": "LibMig"
       },
       {

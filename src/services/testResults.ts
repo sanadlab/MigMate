@@ -24,42 +24,51 @@ export interface TestFailure {
     round: string;
 }
 
+export interface TestSummary {
+    roundName: string;
+    passed: number;
+    failed: number;
+    skipped: number;
+}
+
 export interface TestResults {
     hasFailures: boolean;
     failureCount: number;
     failures: TestFailure[];
-    roundResults: Map<string, {passed: number, failed: number, skipped: number}>;
+    preMigrationSummary?: TestSummary,
+    postMigrationSummary?: TestSummary,
     logContent?: string;
     migrationDetails?: MigrationDetails
 }
 
-// // Check test results in the LibMig output directory
+// // Check test results in the output directory
 export async function checkTestResults(baseDir: string): Promise<TestResults> {
-    // // Check for .libmig directory
-    let libmigDir: string;
+    // // Check for output directory
+    let outputDir: string;
     if (path.basename(baseDir) === '.libmig') {
-        libmigDir = baseDir;
+        outputDir = baseDir;
     } else {
-        libmigDir = path.join(baseDir, '.libmig');
+        outputDir = path.join(baseDir, '.libmig');
     }
 
     const results: TestResults = {
         hasFailures: false,
         failureCount: 0,
         failures: [],
-        roundResults: new Map(),
+        preMigrationSummary: undefined,
+        postMigrationSummary: undefined,
         migrationDetails: undefined
     };
 
-    if (!fs.existsSync(libmigDir)) {
-        logger.warn(`No .libmig directory found at path: ${libmigDir}`);
+    if (!fs.existsSync(outputDir)) {
+        logger.warn(`No output directory found at path: ${outputDir}`);
         return results;
     }
-    logger.info(`Searching for test results in: ${libmigDir}`);
-    results.migrationDetails = getMigrationDetails(libmigDir);
+    logger.info(`Searching for test results in: ${outputDir}`);
+    results.migrationDetails = getMigrationDetails(outputDir);
 
-    // // Try to read the log.md file // check this
-    const logPath = path.join(libmigDir, 'log.md');
+    // // Try to read the log.md file
+    const logPath = path.join(outputDir, 'log.md');
     if (fs.existsSync(logPath)) {
         results.logContent = fs.readFileSync(logPath, 'utf8');
     }
@@ -69,16 +78,28 @@ export async function checkTestResults(baseDir: string): Promise<TestResults> {
         '0-premig',
         '1-llmmig',
         '2-merge_skipped',
-        '3-async_transform',
-        '4-manual_edit'
+        '3-async_transform'
     ];
+
+    // // Find latest round w/ test report for post-migration summary // // check this for stale round folder issue
+    let latestRound: string | undefined;
+    for (let i = rounds.length - 1; i > 0; i--) {
+        const roundDir = path.join(outputDir, rounds[i]);
+        if (fs.existsSync(path.join(roundDir, 'test-report.json')) || fs.existsSync(path.join(roundDir, 'test-report.xml'))) {
+            latestRound = rounds[i];
+            break;
+        }
+    }
 
     // // Look for test reports in each round directory
     for (const round of rounds) {
-        const roundDir = path.join(libmigDir, round);
-        if (!fs.existsSync(roundDir)) {
-            continue;
-        }
+        if (round !== '0-premig' && round !== latestRound) {continue;}
+
+        const roundDir = path.join(outputDir, round);
+        if (!fs.existsSync(roundDir)) {continue;}
+
+        let summary: TestSummary | undefined;
+        let failures: TestFailure[] = [];
 
         // // Prioritize the JSON test report
         const jsonReportPath = path.join(roundDir, 'test-report.json');
@@ -86,72 +107,78 @@ export async function checkTestResults(baseDir: string): Promise<TestResults> {
             try {
                 const reportContent = fs.readFileSync(jsonReportPath, 'utf8');
                 const jsonReport = JSON.parse(reportContent);
+                console.log(jsonReport);
+                failures = parseJsonTestReport(jsonReport, round);
+                console.log(failures);
 
-                // // Parse the JSON report to extract test failures
-                const failures = parseJsonTestReport(jsonReport, round);
-                results.failures.push(...failures);
-
-                // // Update round summary
-                results.roundResults.set(round, {
+                summary = {
+                    roundName: round,
                     passed: jsonReport.summary?.passed || 0,
                     failed: jsonReport.summary?.failed || 0,
-                    skipped: jsonReport.summary?.skipped || 0
-                });
-
-                if (failures.length > 0) {
-                    results.hasFailures = true;
-                    results.failureCount += failures.length;
-                }
-
-                continue; // // Skip to next round if JSON parsing worked
+                    skipped: (jsonReport.summary?.total || 0) - (jsonReport.summary?.passed || 0) - (jsonReport.summary?.failed || 0)
+                };
             } catch (e) {
                 console.error(`Error parsing JSON report for ${round}:`, e);
             }
         }
-
         // // Try XML report next
-        const xmlReportPath = path.join(roundDir, 'test-report.xml');
-        if (fs.existsSync(xmlReportPath)) {
-            // // Just use regex for parsing
-            const xmlContent = fs.readFileSync(xmlReportPath, 'utf8');
-            const testcaseRegex = /<testcase\b([^>]*)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
-            let testcaseMatch;
-            let passedCount = 0, failedCount = 0, skippedCount = 0;
+        else {
+            const xmlReportPath = path.join(roundDir, 'test-report.xml');
+            if (fs.existsSync(xmlReportPath)) {
+                // // Just use regex for parsing
+                const xmlContent = fs.readFileSync(xmlReportPath, 'utf8');
+                const testcaseRegex = /<testcase\b([^>]*)\/>|<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g;
+                let testcaseMatch;
+                let passedCount = 0, failedCount = 0, skippedCount = 0;
 
-            while ((testcaseMatch = testcaseRegex.exec(xmlContent)) !== null) {
-                const attrs = testcaseMatch[1] || testcaseMatch[2];
-                const inner = testcaseMatch[3] || '';
-                const nameMatch = attrs.match(/name="(.*?)"/);
-                const classnameMatch = attrs.match(/classname="(.*?)"/);
-                const name = nameMatch ? nameMatch[1] : 'unknown';
-                const file = classnameMatch ? classnameMatch[1] : 'unknown';
+                while ((testcaseMatch = testcaseRegex.exec(xmlContent)) !== null) {
+                    const attrs = testcaseMatch[1] || testcaseMatch[2];
+                    const inner = testcaseMatch[3] || '';
+                    const nameMatch = attrs.match(/name="(.*?)"/);
+                    const classnameMatch = attrs.match(/classname="(.*?)"/);
+                    const name = nameMatch ? nameMatch[1] : 'unknown';
+                    const file = classnameMatch ? classnameMatch[1].replace(/\./g, '/') + '.py' : 'unknown';
 
-                if (/<failure\b/.test(inner)) {
-                    failedCount++;
-                    const failureMsgMatch = inner.match(/<failure[^>]*message="([^"]*)"/);
-                    const failureMsg = failureMsgMatch ? failureMsgMatch[1] : 'Test failed';
-                    results.failures.push({
-                        name,
-                        file,
-                        message: failureMsg,
-                        round
-                    });
-                    results.hasFailures = true;
-                    results.failureCount++;
-                } else if (/<skipped\b/.test(inner)) {
-                    skippedCount++;
-                } else {
-                    passedCount++;
+                    if (/<failure\b/.test(inner)) {
+                        failedCount++;
+                        const failureMsgMatch = inner.match(/<failure[^>]*message="([^"]*)"/);
+                        const failureMsg = failureMsgMatch ? failureMsgMatch[1] : 'Test failed';
+                        failures.push({
+                            name,
+                            file,
+                            message: failureMsg,
+                            round
+                        });
+                    } else if (/<skipped\b/.test(inner)) {
+                        skippedCount++;
+                    } else {
+                        passedCount++;
+                    }
                 }
-            }
 
-            // // Add round summary
-            results.roundResults.set(round, {
-                passed: passedCount,
-                failed: failedCount,
-                skipped: skippedCount
-            });
+                summary = {
+                    roundName: round,
+                    passed: passedCount,
+                    failed: failedCount,
+                    skipped: skippedCount
+                };
+            }
         }
+
+        if (summary) {
+            if (round === '0-premig') {
+                results.preMigrationSummary = summary;
+            } else if (round === latestRound) {
+                results.postMigrationSummary = summary;
+                results.failures = failures;
+                results.failureCount = failures.length;
+                results.hasFailures = failures.length > 0;
+            }
+        }
+    }
+    // Use premig as the final state if no other results found
+    if (!results.postMigrationSummary && results.preMigrationSummary) {
+        results.postMigrationSummary = results.preMigrationSummary;
     }
     return results;
 }
@@ -192,12 +219,12 @@ function parseJsonTestReport(report: any, round: string): TestFailure[] {
 }
 
 // // Pull additional migration details from 'report.yaml'
-function getMigrationDetails(libmigDir: string): MigrationDetails | undefined {
+function getMigrationDetails(outputDir: string): MigrationDetails | undefined {
     try {
         // // Find report path
-        const reportPath = path.join(libmigDir, 'report.yaml');
+        const reportPath = path.join(outputDir, 'report.yaml');
         if (!fs.existsSync(reportPath)) {
-            logger.warn(`No report.yaml found in ${libmigDir}`);
+            logger.warn(`No report.yaml found in ${outputDir}`);
             return undefined;
         }
         const reportContent = fs.readFileSync(reportPath, 'utf8');
@@ -314,19 +341,34 @@ function generateTestResultsHtml(results: TestResults): string {
         </div>`;
     }
 
-    let roundsHtml = '';
-    results.roundResults.forEach((stats, round) => {
-        roundsHtml += `
-            <div class="round">
-                <h3>${formatRoundName(round)}</h3>
+    const renderSummaryCard = (summary: TestSummary | undefined, title: string) => {
+        if (!summary) {
+            return `
+            <div class="summary-card">
+                <h3>${title}</h3>
                 <div class="stats">
-                    <span class="passed">Passed: ${stats.passed}</span>
-                    <span class="failed">Failed: ${stats.failed}</span>
-                    <span class="skipped">Skipped: ${stats.skipped}</span>
+                    <span class="skipped">No data</span>
                 </div>
+            </div>`;
+        }
+        return `
+        <div class="summary-card">
+            <h3>${title}${title === 'Post-Migration' ? `<span class="round-name">${formatRoundName(summary.roundName)}</span>` : ''}</h3>
+            <div class="stats">
+                <span class="passed">Passed: ${summary.passed}</span>
+                <span class="failed">Failed: ${summary.failed}</span>
+                <span class="skipped">Skipped: ${summary.skipped}</span>
             </div>
-        `;
-    });
+        </div>`;
+    };
+
+    const summaryHtml = `
+        <div class="summary-container">
+            ${renderSummaryCard(results.preMigrationSummary, 'Pre-Migration')}
+            <div class="arrow">→</div>
+            ${renderSummaryCard(results.postMigrationSummary, 'Post-Migration')}
+        </div>
+    `;
 
     let failuresHtml = '';
     results.failures.forEach(failure => {
@@ -358,36 +400,62 @@ function generateTestResultsHtml(results: TestResults): string {
                 font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif);
                 padding: 20px;
             }
-            h2 {
+            h2, h3 {
                 color: var(--vscode-editor-foreground);
                 border-bottom: 1px solid var(--vscode-panel-border, #444);
                 padding-bottom: 10px;
             }
-            .summary {
-                margin-bottom: 20px;
-                font-size: 1.2em;
+            h3 {
+                border-bottom: none;
+                padding-bottom: 5px;
             }
-            .rounds {
+            .overall-summary {
+                margin-bottom: 20px;
+                font-size: 1.4em;
+            }
+            .summary-container {
                 display: flex;
-                flex-wrap: wrap;
-                gap: 15px;
+                align-items: center;
+                justify-content: center;
+                gap: 20px;
                 margin-bottom: 20px;
+                flex-wrap: wrap;
             }
-            .round {
+            .summary-card {
                 background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background, #222));
                 border: 1px solid var(--vscode-panel-border, #444);
                 border-radius: 5px;
-                padding: 10px;
-                min-width: 200px;
+                padding: 15px;
+                min-width: 220px;
                 box-shadow: 0 1px 4px 0 rgba(0,0,0,0.07);
+                flex-grow: 1;
+                max-width: 400px;
             }
-            .round h3 {
+            .summary-card h3 {
                 margin-top: 0;
-                color: var(--vscode-editor-foreground);
+                text-align: center;
+                margin-bottom: 20px;
+                min-height: 40px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+            .round-name {
+                font-size: 0.9em;
+                font-weight: normal;
+                color: var(--vscode-descriptionForeground);
+                display: block;
+                margin-top: 4px;
+            }
+            .arrow {
+                font-size: 2.5em;
+                color: var(--vscode-descriptionForeground);
             }
             .stats {
                 display: flex;
-                gap: 10px;
+                flex-direction: row;
+                gap: 15px;
+                font-size: 1.1em;
             }
             .passed {
                 color: var(--vscode-testing-iconPassed, #4bb543);
@@ -402,7 +470,8 @@ function generateTestResultsHtml(results: TestResults): string {
                 font-weight: bold;
             }
             .failures {
-                margin-top: 30px;
+                margin-top: 20px;
+                margin-bottom: 15px;
             }
             .failure {
                 background: var(--vscode-editorError-background, #2d2d2d);
@@ -475,7 +544,7 @@ function generateTestResultsHtml(results: TestResults): string {
             }
 
             .log {
-                margin-top: 30px;
+                margin-top: 20px;
                 padding: 15px;
                 background: var(--vscode-editorWidget-background, #181818);
                 border-radius: 5px;
@@ -520,19 +589,18 @@ function generateTestResultsHtml(results: TestResults): string {
     </head>
     <body>
         ${migrationInfoHtml}
-        <h2>Migration Test Results</h2>
-        <div class="summary">
+        <h2 class="overall-summary">Migration Test Results:
             ${results.failureCount > 0
-                ? `<span class="failed">❌ ${results.failureCount} test${results.failureCount !== 1 ? 's' : ''} failed</span>`
-                : results.roundResults.size > 0
+                ? `<span class="failed">❌ ${results.failureCount} test${results.failureCount !== 1 ? 's' : ''} failed in the final round</span>`
+                : results.postMigrationSummary
                     ? '<span class="passed">✅ All tests passed</span>'
                     : '<span class="skipped">No test results found</span>'
-                }
-        </div>
+            }
+        </h2>
 
-        <h3>Results by Migration Round</h3>
-        <div class="rounds">
-            ${roundsHtml || '<p>No round data available</p>'}
+        <h3>Test Summary</h3>
+        <div class="summary-container">
+            ${summaryHtml}
         </div>
 
         ${results.failureCount > 0 ? `
@@ -591,7 +659,6 @@ function formatRoundName(round: string): string {
         case '1-llmmig': return 'LLM Migration';
         case '2-merge-skipped': return 'Merge Skipped';
         case '3-async_transform': return 'Async Transform';
-        case '4-manual_edit': return 'Manual Edit';
         default: return round;
     }
 }
