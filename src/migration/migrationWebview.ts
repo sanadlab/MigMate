@@ -111,6 +111,16 @@ export class MigrationWebview {
             // // Apply the edits
             const success = await vscode.workspace.applyEdit(edit);
             if (success) {
+                // Save all modified documents
+                const docsToSave = new Set<string>();
+                for (const file of selectedFiles) {
+                    docsToSave.add(file.path);
+                }
+                for (const docPath of docsToSave) {
+                    const uri = vscode.Uri.file(docPath);
+                    const doc = await vscode.workspace.openTextDocument(uri);
+                    await doc.save();
+                }
                 vscode.window.showInformationMessage('Migration changes applied successfully');
             } else {
                 vscode.window.showWarningMessage('Could not apply webview changes');
@@ -282,7 +292,7 @@ export class MigrationWebview {
             this.generateHunkItem(hunk, fileIndex)
         ).join('');
 
-        return `<div class="file-item" data-file-path="${change.uri.fsPath}">
+        return `<div class="file-item" data-file-path="${change.uri.fsPath}" data-file-index="${fileIndex}">
             <div class="file-header">
                 <input type="checkbox" class="file-checkbox" data-file-index="${fileIndex}" checked>
                 <span class="file-path">${path.basename(change.uri.fsPath)}</span>
@@ -319,54 +329,73 @@ export class MigrationWebview {
 
     private generateScript(filesJson: string): string {
         return `<script>
-            // Get VS Code API
+            // // Log the state of the Webview
+            function debugState() {
+                console.log('Total file items:', document.querySelectorAll('.file-item').length);
+                console.log('Total file checkboxes:', document.querySelectorAll('.file-checkbox').length);
+                console.log('Checked file checkboxes:', document.querySelectorAll('.file-checkbox:checked').length);
+                console.log('Total hunk checkboxes:', document.querySelectorAll('.hunk-checkbox').length);
+                console.log('Checked hunk checkboxes:', document.querySelectorAll('.hunk-checkbox:checked').length);
+                console.log('Select all checked:', document.getElementById('select-all').checked);
+            }
+
+            // // Get VS Code API
             const vscode = acquireVsCodeApi();
 
-            // Track all selected hunks
+            // // Track all selected hunks
             const files = ${filesJson};
 
-            // Listen for checkbox changes
+            // // Function to update the "select all" checkbox state based on all other checkboxes
+            function updateSelectAllState() {
+                const allCheckboxes = document.querySelectorAll('.hunk-checkbox, .file-checkbox');
+                const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+                document.getElementById('select-all').checked = allChecked;
+            }
+
+            // // Listen for checkbox changes
             document.addEventListener('DOMContentLoaded', () => {
-                // Handle select all checkbox
+                // // Handle select all checkbox
                 const selectAllCheckbox = document.getElementById('select-all');
                 selectAllCheckbox.addEventListener('change', () => {
                     const isChecked = selectAllCheckbox.checked;
                     document.querySelectorAll('.file-checkbox, .hunk-checkbox').forEach(checkbox => {
                         checkbox.checked = isChecked;
-                        updateSelection(checkbox);
                     });
                 });
 
-                // Handle file checkboxes
+                // // Handle file checkboxes
                 document.querySelectorAll('.file-checkbox').forEach(checkbox => {
                     checkbox.addEventListener('change', () => {
                         const fileIndex = parseInt(checkbox.getAttribute('data-file-index'));
                         const isChecked = checkbox.checked;
 
-                        // Update all hunks in this file
+                        // // Update all hunks in this file
                         document.querySelectorAll('.hunk-checkbox[data-file-index="' + fileIndex + '"]').forEach(hunkCheckbox => {
                             hunkCheckbox.checked = isChecked;
-                            updateSelection(hunkCheckbox);
                         });
+
+                        // // Update the "select all" checkbox state
+                        updateSelectAllState();
                     });
                 });
 
-                // Handle hunk checkboxes
+                // // Handle hunk checkboxes
                 document.querySelectorAll('.hunk-checkbox').forEach(checkbox => {
                     checkbox.addEventListener('change', () => {
-                        updateSelection(checkbox);
-
-                        // Check if all hunks in file are selected/deselected
+                        // // Check if all hunks in file are selected/deselected
                         const fileIndex = parseInt(checkbox.getAttribute('data-file-index'));
                         const fileCheckbox = document.querySelector('.file-checkbox[data-file-index="' + fileIndex + '"]');
                         const allHunkCheckboxes = document.querySelectorAll('.hunk-checkbox[data-file-index="' + fileIndex + '"]');
                         const allChecked = Array.from(allHunkCheckboxes).every(cb => cb.checked);
 
                         fileCheckbox.checked = allChecked;
+
+                        // // Update the global select-all checkbox
+                        updateSelectAllState();
                     });
                 });
 
-                // Handle view diff buttons
+                // // Handle view diff buttons
                 document.querySelectorAll('.view-diff-button').forEach(button => {
                     button.addEventListener('click', () => {
                         const filePath = button.getAttribute('data-file-path');
@@ -377,19 +406,26 @@ export class MigrationWebview {
                     });
                 });
 
-                // Handle apply button
+                // // Handle apply button
                 document.querySelector('.apply-button').addEventListener('click', () => {
-                    const selectedFiles = files.map(file => {
+                    console.log('Apply button clicked');
+                    debugState();
+                    const selectedFiles = files.map((file, index) => {
+                        // // Find the parent file container
+                        const fileContainer = document.querySelector('.file-item[data-file-index="' + index + '"]');
+                        if (!fileContainer) return null;
+
                         const selectedHunks = file.hunks.filter(hunkId => {
-                            // Use string concatenation instead of template literals
-                            const checkbox = document.querySelector('.hunk-checkbox[data-hunk-id="' + hunkId + '"]');
+                            // // Find the checkbox within the specific file container
+                            const checkbox = fileContainer.querySelector('.hunk-checkbox[data-hunk-id="' + hunkId + '"]');
                             return checkbox && checkbox.checked;
                         });
+
                         return {
                             path: file.path,
                             selectedHunks
                         };
-                    }).filter(file => file.selectedHunks.length > 0);
+                    }).filter(file => file && file.selectedHunks.length > 0);
 
                     vscode.postMessage({
                         command: 'applyChanges',
@@ -397,27 +433,13 @@ export class MigrationWebview {
                     });
                 });
 
-                // Handle cancel button
+                // // Handle cancel button
                 document.querySelector('.cancel-button').addEventListener('click', () => {
                     vscode.postMessage({
                         command: 'cancel'
                     });
                 });
             });
-
-            function updateSelection(checkbox) {
-                const hunkId = parseInt(checkbox.getAttribute('data-hunk-id'));
-                const fileIndex = parseInt(checkbox.getAttribute('data-file-index'));
-
-                if (isNaN(hunkId) || isNaN(fileIndex)) return;
-
-                // Update the tracking object
-                const isChecked = checkbox.checked;
-                if (!isChecked) {
-                    // Update the select all checkbox
-                    document.getElementById('select-all').checked = false;
-                }
-            }
         </script>`;
     }
 
