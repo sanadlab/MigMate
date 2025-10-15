@@ -51,14 +51,18 @@ export class MigrationWebview {
                         await vscode.window.showTextDocument(document);
                         break;
 
-                    case 'viewDiff': // check this
+                    case 'viewDiff':
                         const originalUri = vscode.Uri.file(message.filePath);
                         const change = migrationState.getChange(originalUri);
                         if (change) {
                             const updatedUri = vscode.Uri.parse(`libmig-preview:${originalUri.fsPath}`);
-                            const title = `${path.basename(originalUri.fsPath)} (Original ↔ Migrated)`;
+                            const title = `${path.basename(originalUri.fsPath)} (Original ↔ Migrated)`;  // check this
                             await vscode.commands.executeCommand('vscode.diff', originalUri, updatedUri, title);
                         }
+                        break;
+
+                    case 'applyFileChanges':
+                        await this.applyFileChanges(message.filePath);
                         break;
 
                     case 'applySingleChange':
@@ -144,13 +148,33 @@ export class MigrationWebview {
         }
     }
 
+    private async applyFileChanges(filePath: string): Promise<void> {
+        const uri = vscode.Uri.file(filePath);
+        const change = migrationState.getChange(uri);
+        if (!change) {
+            logger.warn(`Could not find Webview change for file: ${filePath}`);
+            return;
+        }
+        const selectedFile = {
+            path: filePath,
+            selectedHunks: change.hunks.map(h => h.id)
+        };
+        await this.applySelectedChanges([selectedFile]);
+    }
+
     private async applySingleChange(filePath: string, hunkId: number): Promise<void> {
         try {
             const uri = vscode.Uri.file(filePath);
             const change = migrationState.getChange(uri);
-            if (!change) {return;}
+            if (!change) {
+                logger.warn(`Could not find Webview change for hunk ${hunkId} in file: ${filePath}`);
+                return;
+            }
             const hunkToApply = change.hunks.find(h => h.id === hunkId);
-            if (!hunkToApply) {return;}
+            if (!hunkToApply) {
+                logger.warn(`Could not find Webview hunk ${hunkId} in file: ${filePath}`);
+                return;
+            }
 
             const doc = await vscode.workspace.openTextDocument(uri);
             const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
@@ -240,6 +264,15 @@ export class MigrationWebview {
             .file-header-buttons {
                 display: flex;
                 gap: 5px;
+            }
+            .apply-file-button {
+                margin-left: 10px;
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: none;
+                padding: 4px 8px;
+                border-radius: 3px;
+                cursor: pointer;
             }
             .jump-to-file-button, .view-diff-button {
                 background: var(--vscode-button-secondaryBackground);
@@ -358,6 +391,7 @@ export class MigrationWebview {
                     <button class="jump-to-file-button" data-file-path="${change.uri.fsPath}">View File</button>
                     <button class="view-diff-button" data-file-path="${change.uri.fsPath}">View Diff</button>
                 </div>
+                <button class="apply-file-button" data-file-path="${change.uri.fsPath}">Apply File Changes</button>
             </div>
             <div class="hunks">
                 ${hunksHtml}
@@ -478,6 +512,17 @@ export class MigrationWebview {
                         const filePath = button.getAttribute('data-file-path');
                         vscode.postMessage({
                             command: 'viewDiff',
+                            filePath
+                        });
+                    });
+                });
+
+                // // Handle apply file changes buttons
+                document.querySelectorAll('.apply-file-button').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const filePath = button.getAttribute('data-file-path');
+                        vscode.postMessage({
+                            command: 'applyFileChanges',
                             filePath
                         });
                     });
