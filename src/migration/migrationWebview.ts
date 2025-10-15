@@ -239,9 +239,25 @@ export class MigrationWebview {
             .migration-info {
                 background: var(--vscode-editorWidget-background);
                 border-left: 3px solid var(--vscode-activityBar-activeBorder);
-                padding: 10px;
+                padding: 15px;
                 margin-bottom: 20px;
                 border-radius: 3px;
+                display: flex;
+                justify-content: space-around;
+                align-items: center;
+            }
+            .info-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            .info-label {
+                font-size: 0.9em;
+                color: var(--vscode-descriptionForeground);
+            }
+            .info-value {
+                font-size: 1.1em;
+                font-weight: bold;
             }
             .file-item {
                 margin-bottom: 15px;
@@ -255,13 +271,35 @@ export class MigrationWebview {
                 border-bottom: 1px solid var(--vscode-panel-border);
                 display: flex;
                 align-items: center;
+                cursor: pointer;
             }
             .file-path {
                 margin-left: 8px;
-                flex-grow: 1;
                 font-weight: bold;
             }
+            .file-summary {
+                margin-left: 10px;
+                font-style: italic;
+                color: var(--vscode-descriptionForeground);
+                display: none;
+            }
+            .dropdown-arrow {
+                margin-left: 10px;
+                width: 0;
+                height: 0;
+                border-top: 5px solid transparent;
+                border-bottom: 5px solid transparent;
+                border-left: 5px solid currentColor;
+                transition: transform 0.2s ease-in-out;
+            }
+            details[open] > summary .dropdown-arrow {
+                transform: rotate(90deg);
+            }
+            details:not([open]) > summary .file-summary {
+                display: inline;
+            }
             .file-header-buttons {
+                margin-left: auto;
                 display: flex;
                 gap: 5px;
             }
@@ -302,20 +340,30 @@ export class MigrationWebview {
             }
             .hunk-type-added {
                 background: var(--vscode-diffEditor-insertedTextBackground);
-                color: var(--vscode-gitDecoration-addedResourceForeground);
+                color: var(--vscode-editor-foreground);
             }
             .hunk-type-removed {
                 background: var(--vscode-diffEditor-removedTextBackground);
-                color: var(--vscode-gitDecoration-deletedResourceForeground);
+                color: var(--vscode-editor-foreground);
+            }
+            .hunk-type-replaced {
+                background: var(--vscode-badge-background);
+                color: var(--vscode-editor-foreground);
             }
             .hunk-content {
-                background: var(--vscode-editor-background);
                 font-family: var(--vscode-editor-font-family);
                 padding: 8px;
-                border-radius: 3px;
-                white-space: pre;
+                white-space: pre-wrap;
                 overflow-x: auto;
                 font-size: var(--vscode-editor-font-size);
+            }
+            .hunk-content-removed {
+                background: var(--vscode-diffEditor-removedTextBackground);
+                border-radius: 3px;
+            }
+            .hunk-content-added {
+                background: var(--vscode-diffEditor-insertedTextBackground);
+                border-radius: 3px;
             }
             .buttons {
                 display: flex;
@@ -359,9 +407,18 @@ export class MigrationWebview {
         return `<div class="header">
             <h2>Migration Preview</h2>
             <div class="migration-info">
-                <div><strong>Source Library:</strong> ${srcLib}</div>
-                <div><strong>Target Library:</strong> ${tgtLib}</div>
-                <div><strong>Files to Update:</strong> ${filesCount}</div>
+                <div class="info-item">
+                    <span class="info-label">Source Library</span>
+                    <span class="info-value">${srcLib}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Target Library</span>
+                    <span class="info-value">${tgtLib}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Files to Update</span>
+                    <span class="info-value">${filesCount}</span>
+                </div>
             </div>
             <div class="select-all-checkbox">
                 <input type="checkbox" id="select-all" checked>
@@ -379,27 +436,49 @@ export class MigrationWebview {
     }
 
     private generateFileItem(change: MigrationChange, fileIndex: number): string {
-        const hunksHtml = change.hunks.map(hunk =>
-            this.generateHunkItem(hunk, fileIndex)
-        ).join('');
+        const hunks = change.hunks;
+        const processedHunkIds = new Set<number>();
+        let hunksHtml = '';
+        const totalChanges = change.hunks.filter(h => h.type === 'removed').length + change.hunks.filter(h => h.type === 'added' && !h.pairedHunkId).length;
 
-        return `<div class="file-item" data-file-path="${change.uri.fsPath}" data-file-index="${fileIndex}">
-            <div class="file-header">
+        // Pre-process hunks to group pairs into replacements
+        for (const hunk of hunks) {
+            if (processedHunkIds.has(hunk.id)) {
+                continue;
+            }
+            const pairedHunk = DiffUtils.findPairedHunk(hunk, hunks);
+            if (pairedHunk) {
+                // Replacement --> render a single block for the pair
+                const removalHunk = hunk.type === 'removed' ? hunk : pairedHunk;
+                const additionHunk = hunk.type === 'added' ? hunk : pairedHunk;
+                hunksHtml += this.generateReplacementHunkItem(removalHunk, additionHunk, fileIndex);
+                processedHunkIds.add(removalHunk.id);
+                processedHunkIds.add(additionHunk.id);
+            } else {
+                // Standlone add/remove
+                hunksHtml += this.generateSingleHunkItem(hunk, fileIndex);
+                processedHunkIds.add(hunk.id);
+            }
+        }
+        return `<details class="file-item" data-file-path="${change.uri.fsPath}" data-file-index="${fileIndex}" open>
+            <summary class="file-header">
                 <input type="checkbox" class="file-checkbox" data-file-index="${fileIndex}" checked>
                 <span class="file-path">${path.basename(change.uri.fsPath)}</span>
+                <span class="dropdown-arrow"></span>
+                <span class="file-summary" data-file-index="${fileIndex}">${totalChanges} changes</span>
                 <div class="file-header-buttons">
                     <button class="jump-to-file-button" data-file-path="${change.uri.fsPath}">View File</button>
                     <button class="view-diff-button" data-file-path="${change.uri.fsPath}">View Diff</button>
                 </div>
                 <button class="apply-file-button" data-file-path="${change.uri.fsPath}">Apply File Changes</button>
-            </div>
+            </summary>
             <div class="hunks">
                 ${hunksHtml}
             </div>
-        </div>`;
+        </details>`;
     }
 
-    private generateHunkItem(hunk: DiffHunk, fileIndex: number): string {
+    private generateSingleHunkItem(hunk: DiffHunk, fileIndex: number): string {
         return `<div class="hunk-container" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
             <div class="hunk-header">
                 <input type="checkbox" class="hunk-checkbox"
@@ -412,11 +491,26 @@ export class MigrationWebview {
                     Apply
                 </button>
             </div>
-            <div class="hunk-content"
-                data-hunk-id="${hunk.id}"
-                data-file-index="${fileIndex}">
-                ${this.escapeHtml(hunk.lines.join('\n'))}
+            <div class="hunk-content ${hunk.type === 'added' ? 'hunk-content-added' : 'hunk-content-removed'}">${this.escapeHtml(hunk.lines.join('\n'))}</div>
+        </div>`;
+    }
+
+    private generateReplacementHunkItem(removalHunk: DiffHunk, additionHunk: DiffHunk, fileIndex: number): string {
+        const hunkIds = `${removalHunk.id},${additionHunk.id}`;
+        return `<div class="hunk-container" data-hunk-id="${hunkIds}" data-file-index="${fileIndex}">
+            <div class="hunk-header">
+                <input type="checkbox" class="hunk-checkbox"
+                    data-hunk-id="${hunkIds}"
+                    data-file-index="${fileIndex}" checked>
+                <span class="hunk-type hunk-type-replaced">
+                    Replaced at line ${removalHunk.originalStartLine + 1}
+                </span>
+                <button class="apply-single-button" data-hunk-id="${hunkIds}" data-file-index="${fileIndex}">
+                    Apply
+                </button>
             </div>
+            <div class="hunk-content hunk-content-removed">${this.escapeHtml(removalHunk.lines.join('\n'))}</div>
+            <div class="hunk-content hunk-content-added">${this.escapeHtml(additionHunk.lines.join('\n'))}</div>
         </div>`;
     }
 
@@ -565,32 +659,32 @@ export class MigrationWebview {
                 // // Handle individual apply buttons
                 document.querySelectorAll('.apply-single-button').forEach(button => {
                     button.addEventListener('click', () => {
-                        const hunkId = parseInt(button.getAttribute('data-hunk-id'));
+                        // The hunkId can now be a single ID or a comma-separated pair
+                        const hunkIdString = button.getAttribute('data-hunk-id');
                         const fileIndex = parseInt(button.getAttribute('data-file-index'));
                         const fileInfo = files[fileIndex];
                         const filePath = fileInfo.path;
 
-                        // // Get the content element to update style after applying
-                        const contentElement = document.querySelector(
-                            \`.hunk-content[data-hunk-id="\${hunkId}"][data-file-index="\${fileIndex}"]\`
-                        );
-                        const editedContent = contentElement.textContent;
+                        // We only need to send the first ID of a pair to the backend.
+                        // The backend logic will find the partner automatically.
+                        const primaryHunkId = parseInt(hunkIdString.split(',')[0]);
 
-                        // // Send message to apply just this single change
+                        // Send message to apply the change
                         vscode.postMessage({
                             command: 'applySingleChange',
                             filePath: filePath,
-                            hunkId: hunkId,
+                            hunkId: primaryHunkId,
                         });
 
-                        // // Disable this button and update UI to show change was applied
+                        // Disable this button and update UI to show change was applied
                         button.disabled = true;
                         button.textContent = 'Applied';
-                        contentElement.classList.add('applied');
                         const checkbox = document.querySelector(
-                            \`.hunk-checkbox[data-hunk-id="\${hunkId}"][data-file-index="\${fileIndex}"]\`
+                            \`.hunk-checkbox[data-hunk-id="\${hunkIdString}"]\`
                         );
-                        checkbox.disabled = true;
+                        if (checkbox) {
+                            checkbox.disabled = true;
+                        }
                     });
                 });
             });

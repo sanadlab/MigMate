@@ -334,6 +334,7 @@ function generateTestResultsHtml(results: TestResults): string {
         failuresHtml += `
             <details id="${failureId}" class="failure" open>
                 <summary class="failure-header">
+                    <span class="dropdown-arrow"></span>
                     <span class="failure-round">${formatRoundName(failure.round)}</span>
                     <span class="failure-file">${failure.file}</span>
                     <span class="failure-name">${failure.name}</span>
@@ -422,12 +423,16 @@ function generateTestResultsHtml(results: TestResults): string {
             .failure-header::-webkit-details-marker {
                 display: none;
             }
-            .failure-header::before {
-                content: '▶';
-                font-size: 0.8em;
-                transition: transform 0.1s ease-in-out;
+            .dropdown-arrow {
+                width: 0;
+                height: 0;
+                border-top: 5px solid transparent;
+                border-bottom: 5px solid transparent;
+                border-left: 5px solid currentColor;
+                transition: transform 0.2s ease-in-out;
+                margin-right: 5px;
             }
-            .failure[open] > .failure-header::before {
+            .failure[open] > .failure-header .dropdown-arrow {
                 transform: rotate(90deg);
             }
             .failure-round {
