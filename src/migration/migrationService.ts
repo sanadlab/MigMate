@@ -10,7 +10,7 @@ import { FileProcessor } from './fileProcessor';
 import { MigrationExecutor } from './migrationExecutor';
 import { PreviewManager } from './previewManager';
 import { configService } from '../services/config';
-import { MigrationChange } from '../services/migrationState';
+import { MigrationChange } from './migrationState';
 
 
 

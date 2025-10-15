@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { MigrationChange, DiffHunk, migrationState } from '../services/migrationState';
+import { MigrationChange, DiffHunk, migrationState } from './migrationState';
 import { logger } from '../services/logging';
 
 export class MigrationWebview {

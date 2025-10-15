@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { migrationState } from '../../services/migrationState';
+import { migrationState } from '../../migration/migrationState';
 
 describe('MigrationStateService', () => {
   it('should detect added lines', () => {

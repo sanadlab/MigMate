@@ -13,7 +13,9 @@ export interface DiffHunk {
     type: 'added' | 'removed' | 'unchanged';
     lines: string[];
     originalStartLine: number;
-    status: 'pending' | 'accepted' | 'rejected';
+    status: 'pending' | 'accepted' | 'rejected'; // unused
+    pairedHunkId?: number;
+    description?: string;
 }
 
 class MigrationStateService {

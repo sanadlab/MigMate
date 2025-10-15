@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { migrationState } from '../services/migrationState';
+import { migrationState } from '../migration/migrationState';
 
 
 

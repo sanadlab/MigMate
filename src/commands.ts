@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { migrationState, MigrationChange } from './services/migrationState';
+import { migrationState, MigrationChange } from './migration/migrationState';
 import { configService } from './services/config';
 import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from './services/librariesApi';
 import { runCliTool, buildCliCommand } from './services/cli';

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { migrationState, MigrationChange, DiffHunk } from '../services/migrationState';
+import { migrationState, MigrationChange, DiffHunk } from './migrationState';
 import { configService } from '../services/config';
 import { telemetryService } from '../services/telemetry';
 import { codeLensProvider, InlineDiffProvider } from '../providers';
