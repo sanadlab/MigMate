@@ -5,9 +5,10 @@ import { logger } from '../services/logging';
 
 export class MigrationWebview {
     private panel: vscode.WebviewPanel | undefined;
+    // private editedContents = new Map<string, Map<number, string>>(); // (WIP/optional)
 
     public async showPreview(changes: MigrationChange[], srcLib: string, tgtLib: string): Promise<void> {
-        // // Create webview panel if it doesn't exist or reuse existing
+        // // Create Webview panel if it doesn't exist or reuse existing
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel(
                 'migrationPreview',
@@ -31,7 +32,7 @@ export class MigrationWebview {
         // // Generate HTML
         this.panel.webview.html = this.generatePreviewHtml(changes, srcLib, tgtLib);
 
-        // // Handle messages from webview
+        // // Handle messages from Webview
         this.panel.webview.onDidReceiveMessage(
             async message => {
                 switch (message.command) {
@@ -49,6 +50,24 @@ export class MigrationWebview {
                         const document = await vscode.workspace.openTextDocument(uri);
                         await vscode.window.showTextDocument(document);
                         break;
+                    case 'applySingleChange':
+                        await this.applySingleChange(
+                            message.filePath,
+                            message.hunkId,
+                            message.editedContent
+                        );
+                        break;
+                    // case 'updateEditedContent': // (WIP/optional)
+                    //     const fileIndex = message.fileIndex;
+                    //     const filePath = changes[fileIndex].uri.fsPath;
+                    //     const hunkId = message.hunkId;
+
+                    //     if (!this.editedContents.has(filePath)) {
+                    //         this.editedContents.set(filePath, new Map());
+                    //     }
+
+                    //     this.editedContents.get(filePath)!.set(hunkId, message.content);
+                    //     break;
                 }
             }
         );
@@ -62,21 +81,22 @@ export class MigrationWebview {
             for (const file of selectedFiles) {
                 const uri = vscode.Uri.file(file.path);
                 const change = migrationState.getChange(uri);
-                if (!change) { continue; }
+                if (!change) {continue;}
 
                 const doc = await vscode.workspace.openTextDocument(uri);
                 const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
                 const selectedHunkIds = new Set(file.selectedHunks);
                 const processedHunkIds = new Set<number>();
 
+                // // // Get edited content from Webview (WIP/optional)
+                // const editedContents = new Map<number, string[]>();
+
                 // // Sort hunks by line number to process them from top to bottom
                 const hunks = [...change.hunks].sort((a, b) => a.originalStartLine - b.originalStartLine);
 
                 for (let i = 0; i < hunks.length; i++) {
                     const currentHunk = hunks[i];
-                    if (!selectedHunkIds.has(currentHunk.id) || processedHunkIds.has(currentHunk.id)) {
-                        continue;
-                    }
+                    if (!selectedHunkIds.has(currentHunk.id) || processedHunkIds.has(currentHunk.id)) {continue;}
 
                     // // Attempt to find a paired hunk for replacement
                     if (currentHunk.type === 'removed' && i + 1 < hunks.length) {
@@ -123,7 +143,7 @@ export class MigrationWebview {
                 }
                 vscode.window.showInformationMessage('Migration changes applied successfully');
             } else {
-                vscode.window.showWarningMessage('Could not apply webview changes');
+                vscode.window.showWarningMessage('Could not apply Webview changes');
             }
 
         } catch (error) {
@@ -131,6 +151,65 @@ export class MigrationWebview {
             vscode.window.showErrorMessage('Failed to apply migration changes');
         }
     }
+
+    private async applySingleChange(filePath: string, hunkId: number, editedContent: string): Promise<void> {
+        try {
+            const uri = vscode.Uri.file(filePath);
+            const change = migrationState.getChange(uri);
+            if (!change) {return;}
+            const hunk = change.hunks.find(h => h.id === hunkId);
+            if (!hunk) {return;}
+
+            // // Find the paired removal hunk for this addition
+            let removalHunk: DiffHunk | undefined;
+            if (hunk.type === 'added') {
+                removalHunk = change.hunks.find(h =>
+                    h.type === 'removed' &&
+                    h.originalStartLine === hunk.originalStartLine
+                );
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
+
+            // // Split the edited content into lines
+            const editedLines = editedContent.split(/\r?\n/);
+
+            if (removalHunk) {
+                // // Handle as a replacement
+                const range = new vscode.Range(
+                    new vscode.Position(removalHunk.originalStartLine, 0),
+                    new vscode.Position(removalHunk.originalStartLine + removalHunk.lines.length, 0)
+                );
+                const newText = editedLines.join(eol) + (editedLines.length > 0 ? eol : '');
+                edit.replace(uri, range, newText);
+            } else {
+                // // Handle as a simple insertion
+                const pos = new vscode.Position(hunk.originalStartLine, 0);
+                const newText = editedLines.join(eol) + (editedLines.length > 0 ? eol : '');
+                edit.insert(uri, pos, newText);
+            }
+
+            // // Apply the edit
+            const success = await vscode.workspace.applyEdit(edit);
+            if (success) {
+                // // Save the document
+                const doc = await vscode.workspace.openTextDocument(uri);
+                await doc.save();
+                logger.info(`Applied change at line ${hunk.originalStartLine + 1} in ${path.basename(filePath)}`);
+            } else {
+                logger.error(`Failed to apply change at line ${hunk.originalStartLine + 1} in ${path.basename(filePath)}`);
+                vscode.window.showErrorMessage("Failed to apply change");
+            }
+        } catch (error) {
+            logger.error(`Error applying single change: ${error}`);
+            vscode.window.showErrorMessage('Failed to apply change');
+        }
+    }
+
+
+
 
     // // HTML Generation Methods
     private generatePreviewHtml(changes: MigrationChange[], srcLib: string, tgtLib: string): string {
@@ -236,11 +315,29 @@ export class MigrationWebview {
                 overflow-x: auto;
                 font-size: var(--vscode-editor-font-size);
             }
+            // .hunk-content.editable {
+            //     border: 1px solid var(--vscode-input-border);
+            //     background-color: var(--vscode-input-background);
+            //     color: var(--vscode-input-foreground);
+            // }
+            // .hunk-content.editable:focus {
+            //     outline: 1px solid var(--vscode-focusBorder);
+            // }
             .buttons {
                 display: flex;
                 justify-content: flex-end;
                 margin-top: 20px;
                 gap: 10px;
+            }
+            .apply-single-button {
+                margin-left: auto;
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: none;
+                padding: 4px 8px;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 0.8em;
             }
             .apply-button {
                 background: var(--vscode-button-background);
@@ -305,6 +402,7 @@ export class MigrationWebview {
     }
 
     private generateHunkItem(hunk: DiffHunk, fileIndex: number): string {
+        const isEditable = hunk.type === 'added'; // (WIP/optional)
         return `<div class="hunk-container" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
             <div class="hunk-header">
                 <input type="checkbox" class="hunk-checkbox"
@@ -313,8 +411,15 @@ export class MigrationWebview {
                 <span class="hunk-type ${hunk.type === 'added' ? 'hunk-type-added' : 'hunk-type-removed'}">
                     ${hunk.type === 'added' ? 'Added' : 'Removed'} at line ${hunk.originalStartLine + 1}
                 </span>
+                ${isEditable ?
+                    `<button class="apply-single-button" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
+                        Apply
+                    </button>` : ''}
             </div>
-            <div class="hunk-content">
+            <div class="hunk-content ${isEditable ? 'editable' : ''}"
+                /* ${isEditable ? 'contenteditable="true"' : ''} */
+                data-hunk-id="${hunk.id}"
+                data-file-index="${fileIndex}">
                 ${this.escapeHtml(hunk.lines.join('\n'))}
             </div>
         </div>`;
@@ -439,6 +544,53 @@ export class MigrationWebview {
                         command: 'cancel'
                     });
                 });
+
+                // // Handle individual apply buttons
+                document.querySelectorAll('.apply-single-button').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const hunkId = parseInt(button.getAttribute('data-hunk-id'));
+                        const fileIndex = parseInt(button.getAttribute('data-file-index'));
+                        const fileInfo = files[fileIndex];
+                        const filePath = fileInfo.path;
+
+                        // // Get the (possibly) edited content from the editable div
+                        const contentElement = document.querySelector(
+                            \`.hunk-content[data-hunk-id="\${hunkId}"][data-file-index="\${fileIndex}"]\`
+                        );
+                        const editedContent = contentElement.textContent;
+
+                        // // Send message to apply just this single change
+                        vscode.postMessage({
+                            command: 'applySingleChange',
+                            filePath: filePath,
+                            hunkId: hunkId,
+                            editedContent: editedContent
+                        });
+
+                        // // Disable this button and update UI to show change was applied
+                        button.disabled = true;
+                        button.textContent = 'Applied';
+                        contentElement.classList.add('applied');
+                        const checkbox = document.querySelector(
+                            \`.hunk-checkbox[data-hunk-id="\${hunkId}"][data-file-index="\${fileIndex}"]\`
+                        );
+                        checkbox.disabled = true;
+                    });
+                });
+
+                // // // Handle editable hunks in preview (WIP/optional)
+                // document.querySelectorAll('.hunk-content.editable').forEach(content => {
+                //     content.addEventListener('input', () => {
+                //         const hunkId = parseInt(content.getAttribute('data-hunk-id'));
+                //         const fileIndex = parseInt(content.getAttribute('data-file-index'));
+                //         vscode.postMessage({
+                //             command: 'updateEditedContent',
+                //             hunkId: hunkId,
+                //             fileIndex: fileIndex,
+                //             content: content.textContent
+                //         });
+                //     });
+                // });
             });
         </script>`;
     }

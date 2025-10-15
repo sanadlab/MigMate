@@ -15,6 +15,7 @@ import * as os from 'os';
 
 import { COMMANDS } from './constants';
 import { MigrationService } from './migration/migrationService';
+import { MigrationWebview } from './migration/migrationWebview';
 
 
 
@@ -41,6 +42,14 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		}
 		const testResults = await checkTestResults(resultsDir);
 		showTestResultsDetail(testResults);
+	});
+
+
+
+	// // Temp to display experimental migration webview
+	const viewWebviewCommand = vscode.commands.registerCommand('libmig.viewWebview', async () => {
+		const webview = new MigrationWebview();
+		await webview.showPreview([], 'requests', 'httpx');
 	});
 
 

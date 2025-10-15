@@ -5,6 +5,7 @@ import { configService } from '../services/config';
 import { telemetryService } from '../services/telemetry';
 import { codeLensProvider, InlineDiffProvider } from '../providers';
 import { logger } from '../services/logging';
+import { MigrationWebview } from './migrationWebview';
 
 
 
@@ -16,9 +17,11 @@ interface AppliedChange {
 
 export class PreviewManager {
     private inlineDiffProvider: InlineDiffProvider;
+    private migrationWebview: MigrationWebview;
 
     constructor() {
         this.inlineDiffProvider = new InlineDiffProvider();
+        this.migrationWebview = new MigrationWebview();
     }
 
     public async showChanges(changes: Omit<MigrationChange, 'hunks'>[], srcLib: string, tgtLib: string): Promise<void> {
@@ -30,14 +33,17 @@ export class PreviewManager {
         migrationState.loadChanges(changes);
 
         // // Show preview based on mode selected in config
-        const previewMode = configService.get<string>('flags.previewGrouping');
+        const previewMode = configService.get<string>('options.previewGrouping');
         logger.info(`Using preview mode: ${previewMode}`);
 
-        if (previewMode === 'All at once') {
+        if (previewMode === 'webview') {
+            await this.migrationWebview.showPreview(migrationState.getChanges(), srcLib, tgtLib);
+        } else if (previewMode === 'All at once') {
             const appliedChanges = await this.showGroupedPreview();
+            console.log("Applied changes:", appliedChanges);
             if (appliedChanges) {
-                console.log(appliedChanges);
                 const totalApplied = appliedChanges.reduce((sum, change) => sum + change.appliedHunks, 0);
+                console.log(`Applied changes to ${totalApplied} hunks`);
                 const totalOperations = appliedChanges.reduce((sum, change) => sum + change.totalHunks, 0);
                 telemetryService.sendTelemetryEvent('migrationChangesApplied', {
                     source: srcLib,
@@ -99,7 +105,7 @@ export class PreviewManager {
 
             for (let i = 0; i < hunks.length; i++) {
                 const currentHunk = hunks[i];
-                if (processedHunkIds.has(currentHunk.id)) {continue;} // hopefully stops the changes from being unchecked by default
+                if (processedHunkIds.has(currentHunk.id)) {continue;} // doesn't stop the changes from being unchecked by default
 
                 // // Pair remove + added --> replacement
                 if (currentHunk.type === 'removed' && i + 1 < hunks.length) {
@@ -156,64 +162,85 @@ export class PreviewManager {
         await new Promise(resolve => setTimeout(resolve, 200)); // wait for file sync
 
         // // Check applied changes against initial
-        logger.info('Analyzing applied changes for telemetry...');
+        logger.info("Analyzing applied changes for telemetry...");
         const appliedChanges: AppliedChange[] = [];
         for (const change of loadedChanges) {
             const uri = change.uri;
             const filePath = uri.fsPath;
             const hunks = migrationState.getHunks(uri);
+            console.log(`Analyzing file: ${path.basename(filePath)} with ${hunks.length} hunks`);
             try {
                 const doc = await vscode.workspace.openTextDocument(uri);
                 const afterContent = doc.getText();
                 const beforeText = beforeContent.get(filePath) ?? '';
+                console.log(`  Content comparison: before ${beforeText.length} chars, after ${afterContent.length} chars`);
+                console.log(`  Content identical? ${beforeText === afterContent}`);
                 if (beforeText === afterContent) {continue;} // skip file if before & after match
+
+                // // Track isolated by file
+                const pairedHunksForFile = new Map<number, number>();
+                const processedBuildHunks = new Set<number>();
+                for (let i = 0; i < hunks.length; i++) {
+                    const currentHunk = hunks[i];
+                    if (processedBuildHunks.has(currentHunk.id)) {continue;}
+                    if (currentHunk.type === 'removed' && i + 1 < hunks.length) {
+                        const nextHunk = hunks[i + 1];
+                        if (nextHunk.type === 'added' && nextHunk.originalStartLine === currentHunk.originalStartLine) {
+                            pairedHunksForFile.set(currentHunk.id, nextHunk.id);
+                            processedBuildHunks.add(currentHunk.id);
+                            processedBuildHunks.add(nextHunk.id);
+                        }
+                    }
+                }
 
                 // // Track analyzed hunks
                 const processedAnalysisHunks = new Set<number>();
-                let appliedHunkCount = 0;
+                let appliedOperationCount = 0;
+                console.log(`  Found ${pairedHunksForFile.size} paired hunks in file`);
 
                 for (const hunk of hunks) {
-                    if (processedAnalysisHunks.has(hunk.id)) {continue;}
+                    if (processedAnalysisHunks.has(hunk.id)) {console.log(`  Skipping already processed hunk ${hunk.id}`); continue;}
+                    console.log(`  Processing hunk ID ${hunk.id}, type: ${hunk.type}, lines: ${hunk.lines.length}`);
                     let wasApplied = false;
-                    const pairedId = pairedHunks.get(hunk.id);
+                    const pairedId = pairedHunksForFile.get(hunk.id);
 
                     // // Part of a replacement
                     if (pairedId) {
+                        console.log(`  Hunk ${hunk.id} is paired with ${pairedId}`);
                         const pairedHunk = hunks.find(h => h.id === pairedId);
                         if (pairedHunk) {
-                            if (this.isHunkApplied(hunk, beforeText, afterContent) && this.isHunkApplied(pairedHunk, beforeText, afterContent)) {
+                            const firstApplied = this.isHunkApplied(hunk, beforeText, afterContent);
+                            const secondApplied = this.isHunkApplied(pairedHunk, beforeText, afterContent);
+                            console.log(`  Paired hunk check: first=${firstApplied}, second=${secondApplied}`);
+                            if (firstApplied && secondApplied) {
                                 wasApplied = true;
                                 logger.info(`Detected applied replacement at line ${hunk.originalStartLine + 1}`);
                             }
                             processedAnalysisHunks.add(pairedHunk.id);
-                        }
+                        } else {console.log(`  WARNING: Could not find paired hunk with ID ${pairedId}`);}
                     }
                     // // Standalone change
                     else {
                         wasApplied = this.isHunkApplied(hunk, beforeText, afterContent);
+                        console.log(`  Standalone hunk check: applied=${wasApplied}`);
                         if (wasApplied) {
                             logger.info(`Detected applied ${hunk.type} at line ${hunk.originalStartLine + 1}`);
                         }
                     }
 
                     if (wasApplied) {
-                        appliedHunkCount++;
+                        appliedOperationCount++;
                     }
                     processedAnalysisHunks.add(hunk.id);
                 }
+                console.log(`  Final count: ${appliedOperationCount} operations applied`);
 
-                if (appliedHunkCount > 0) {
-                    let pairsInFile = 0;
-                    for (const hunk of hunks) {
-                        if (pairedHunks.has(hunk.id)) {
-                            pairsInFile++;
-                        }
-                    }
-                    const totalOperationsInFile = hunks.length - pairsInFile;
-                    logger.info(`Detected ${appliedHunkCount}/${totalOperationsInFile} applied operations in ${path.basename(filePath)}`);
+                if (appliedOperationCount > 0) {
+                    const totalOperationsInFile = hunks.length - pairedHunksForFile.size;
+                    logger.info(`Detected ${appliedOperationCount}/${totalOperationsInFile} applied operations in ${path.basename(filePath)}`);
                     appliedChanges.push({
                         filePath,
-                        appliedHunks: appliedHunkCount,
+                        appliedHunks: appliedOperationCount,
                         totalHunks: totalOperationsInFile
                     });
                 }
@@ -243,12 +270,15 @@ export class PreviewManager {
     }
 
     private isHunkApplied(hunk: DiffHunk, beforeContent: string, afterContent: string): boolean {
-        const hunkContent = hunk.lines.join('\n');
+        const hunkContent = hunk.lines.join('\n'); // check this // add normalization for EOL?
         if (hunk.type === 'added') {
-            return afterContent.includes(hunkContent);
+            const normalizedAfterContent = afterContent.replace(/\r\n/g, '\n');
+            return normalizedAfterContent.includes(hunkContent);
         }
         if (hunk.type === 'removed') {
-            return beforeContent.includes(hunkContent) && !afterContent.includes(hunkContent);
+            const normalizedBeforeContent = beforeContent.replace(/\r\n/g, '\n');
+            const normalizedAfterContent = afterContent.replace(/\r\n/g, '\n');
+            return normalizedBeforeContent.includes(hunkContent) && !normalizedAfterContent.includes(hunkContent);
             // // // Get the surrounding lines
             // const beforeLines = beforeContent.split('\n');
             // const contextBefore = beforeLines[hunk.originalStartLine - 1] || '';
@@ -261,26 +291,4 @@ export class PreviewManager {
         }
         return false;
     }
-
-    // private async showCustomGranularPreview(changes: Omit<MigrationChange, 'hunks'>[]): Promise<void> {
-    //     const panel = vscode.window.createWebviewPanel(
-    //         'migrationPreview',
-    //         'Migration Preview',
-    //         vscode.ViewColumn.Beside,
-    //         { enableScripts: true }
-    //     );
-    //     panel.webview.html = this.generateChangePreviewHtml(changes);
-
-    //     panel.webview.onDidReceiveMessage(async message => {
-    //         if (message.command === 'applyChange') {
-    //             const changeId = message.changeId;
-    //             const change = migrationState.getChangeById(changeId);
-    //             if (change) {
-    //                 const edit = new vscode.WorkspaceEdit();
-    //                 await vscode.workspace.applyEdit(edit);
-    //                 panel.webview.postMessage({ command: 'changeApplied', changeId });
-    //             }
-    //         }
-    //     });
-    // }
 }
