@@ -3,10 +3,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../services/logging';
 import { MigrationChange } from './migrationState';
+import { DiffUtils } from './diffUtils';
 
 
 
-export class FileProcessor { // update this
+export class FileProcessor { // update the file block patterns
     public async findPythonFiles(workspacePath: string): Promise<{ pythonFiles: vscode.Uri[], requirementsFiles: vscode.Uri[] }> {
         logger.info('Finding Python files in workspace...');
         const excludePattern = '{**/.libmig/**,**/node_modules/**,**/.venv/**,**/venv/**,**/.git/**,**/site-packages/**,**/__pycache__/**,**/\\.pytest_cache/**,**/\\.tox/**,**/\\.mypy_cache/**}'
@@ -45,29 +46,24 @@ export class FileProcessor { // update this
             const compareFilePath = path.join(comparePath, relativePath);
             // console.log(`Comparing original '${relativePath}' to migrated '${compareFilePath}'`);
 
-
             if (!fs.existsSync(compareFilePath)) {continue;}
 
-            // // Try reading the backup/temp files
-            let workspaceContent: string;
-            let compareContent: string;
             try {
-                workspaceContent = fs.readFileSync(fileUri.fsPath, 'utf8');
-                compareContent = fs.readFileSync(compareFilePath, 'utf8');
+                const originalContent = fs.readFileSync(fileUri.fsPath, 'utf8');
+                const updatedContent = fs.readFileSync(compareFilePath, 'utf8');
+                // // Normalize for comparison
+                const normalizedOriginal = DiffUtils.normalizeEOL(originalContent);
+                const normalizedUpdated = DiffUtils.normalizeEOL(updatedContent);
+                if (normalizedOriginal !== normalizedUpdated) {
+                    changes.push({
+                        uri: fileUri,
+                        originalContent,
+                        updatedContent
+                    });
+                }
             } catch (err) {
-                logger.warn(`Failed to read file content: ${err}`);
+                logger.warn(`Failed to read file content for comparison: ${err}`);
                 continue;
-            }
-
-            // // Assign original and updated
-            const originalContent = workspaceContent;
-            const updatedContent = compareContent;
-            if (originalContent !== updatedContent) {
-                changes.push({
-                    uri: fileUri,
-                    originalContent,
-                    updatedContent
-                });
             }
         }
 

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as diff from 'diff';
+import { DiffUtils } from './diffUtils';
 
 export interface MigrationChange {
     uri: vscode.Uri,
@@ -10,12 +11,17 @@ export interface MigrationChange {
 
 export interface DiffHunk {
     id: number;
-    type: 'added' | 'removed' | 'unchanged';
+    type: 'added' | 'removed';
     lines: string[];
     originalStartLine: number;
-    status: 'pending' | 'accepted' | 'rejected'; // unused
     pairedHunkId?: number;
-    description?: string;
+    contextBefore?: string;
+    contextAfter?: string;
+    hashKey?: string; // should help as a unique ID on top of integer 'id'
+    // status?: 'pending' | 'accepted' | 'rejected'; // unused
+    // importance?: 'critical' | 'high' | 'medium' | 'low';
+    // migrationContext?: string; // kind of migration change (import, function call, etc.) // check this --> see how CLI tool classifies
+    // description?: string;
 }
 
 class MigrationStateService {
@@ -30,7 +36,7 @@ class MigrationStateService {
     }
 
     private parseDiff(original: string, updated: string): DiffHunk[] {
-        // // Normalize the line endings, should fix the current preview issue
+        // // Normalize the line endings
         const originalLines = original.replace(/\r\n/g, '\n').split('\n');
         const updatedLines = updated.replace(/\r\n/g, '\n').split('\n');
         const diffResult = diff.diffArrays(originalLines, updatedLines); // check this, compare lines vs arrays
@@ -38,23 +44,48 @@ class MigrationStateService {
         const hunks: DiffHunk[] = [];
         let originalLine = 0;
         let id = 0;
-        let lastRemovedStart: number | null = null;
+        let lastRemovedHunk: DiffHunk | null = null;
         for (const part of diffResult) {
-            const lines = (part.value as string[]) ?? [];
+            const lines = part.value as string[];
             if (part.removed) {
-                const start = originalLine;
-                hunks.push({id: id++, type: 'removed', lines, originalStartLine: start, status: 'pending'});
+                const contextBefore = originalLines.slice(Math.max(0, originalLine - 3), originalLine).join('\n');
+                const contextAfter = originalLines.slice(originalLine + lines.length, Math.min(originalLines.length, originalLine + lines.length + 3)).join('\n');
+                const removedHunk: DiffHunk = {
+                    id: id++,
+                    type: 'removed' as const,
+                    lines: lines,
+                    originalStartLine: originalLine,
+                    contextBefore: contextBefore,
+                    contextAfter: contextAfter,
+                    hashKey: this.createHunkHash(lines, contextBefore, contextAfter)
+                };
+                hunks.push(removedHunk);
                 originalLine += lines.length;
-                lastRemovedStart = start;
+                lastRemovedHunk = removedHunk;
             }
             else if (part.added) {
-                const start = (lastRemovedStart !== null) ? lastRemovedStart : originalLine;
-                hunks.push({id: id++, type: 'added', lines, originalStartLine: start, status: 'pending'});
-                lastRemovedStart = null;
+                const start = lastRemovedHunk ? lastRemovedHunk.originalStartLine : originalLine;
+                const contextBefore = originalLines.slice(Math.max(0, start - 3), start).join('\n');
+                const contextAfter = originalLines.slice(start, Math.min(originalLines.length, start + 3)).join('\n');
+                const addedHunk: DiffHunk = {
+                    id: id++,
+                    type: 'added' as const,
+                    lines: lines,
+                    originalStartLine: start,
+                    pairedHunkId: lastRemovedHunk ? lastRemovedHunk.id : undefined,
+                    contextBefore: contextBefore,
+                    contextAfter: contextAfter,
+                    hashKey: this.createHunkHash(lines, contextBefore, contextAfter)
+                };
+                if (lastRemovedHunk) {
+                    lastRemovedHunk.pairedHunkId = addedHunk.id;
+                }
+                hunks.push(addedHunk);
+                lastRemovedHunk = null;
             }
             else {
                 originalLine += lines.length;
-                lastRemovedStart = null;
+                lastRemovedHunk = null;
             }
         }
         return hunks;
@@ -74,12 +105,11 @@ class MigrationStateService {
         }
         else if (hunk.type === 'added') {
             const pos = new vscode.Position(hunk.originalStartLine, 0);
-            // const insertText = hunk.lines.join('\n') + '\n';
             let insertText = hunk.lines.join(eol);
 
-            // // Case where EOF tries to add empty string? check this
+            // // Case where EOF tries to add empty string
             if (hunk.lines.length === 1 && hunk.lines[0] === '' && hunk.originalStartLine >= 0) {
-                insertText = eol; // might want to check current EOF char instead of always adding
+                insertText = eol;
             }
 
             edit.insert(uri, pos, insertText, {
@@ -88,6 +118,17 @@ class MigrationStateService {
                 needsConfirmation: confirm,
             });
         }
+    }
+
+    private createHunkHash(lines: string[], before: string, after: string): string {
+        const content = `${before}\n${lines.join('\n')}\n${after}`;
+        let hash = 0;
+        for (let i = 0; i < content.length; i++) {
+            const char = content.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash |= 0;
+        }
+        return hash.toString(36);
     }
 
     public cleanString(str: string): string {
@@ -99,29 +140,17 @@ class MigrationStateService {
         return this.changes.get(uri.toString())?.hunks || [];
     }
 
-    getChanges(): MigrationChange[] {
+
+    public getChanges(): MigrationChange[] {
         return Array.from(this.changes.values());
     }
 
-    getChange(uri: vscode.Uri): MigrationChange | undefined {
+    public getChange(uri: vscode.Uri): MigrationChange | undefined {
         return this.changes.get(uri.toString());
     }
 
-    clear() {
+    public clear() {
         this.changes.clear();
-    }
-
-    async applyAll() {
-        const edit = new vscode.WorkspaceEdit();
-        for (const change of this.getChanges()) {
-            const doc = await vscode.workspace.openTextDocument(change.uri);
-            const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
-            const normalized = change.updatedContent.replace(/\r\n|\n/g, eol);
-            const fullRange = new vscode.Range(0, 0, Number.MAX_VALUE, Number.MAX_VALUE);
-            edit.replace(change.uri, fullRange, normalized);
-        }
-        await vscode.workspace.applyEdit(edit);
-        this.clear();
     }
 }
 

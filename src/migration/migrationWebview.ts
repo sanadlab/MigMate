@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { MigrationChange, DiffHunk, migrationState } from './migrationState';
 import { logger } from '../services/logging';
+import { DiffUtils } from './diffUtils';
 
 export class MigrationWebview {
     private panel: vscode.WebviewPanel | undefined;
-    // private editedContents = new Map<string, Map<number, string>>(); // (WIP/optional)
 
     public async showPreview(changes: MigrationChange[], srcLib: string, tgtLib: string): Promise<void> {
         // // Create Webview panel if it doesn't exist or reuse existing
@@ -45,29 +45,27 @@ export class MigrationWebview {
                         this.panel?.dispose();
                         break;
 
-                    case 'viewDiff':
+                    case 'viewDiff': // check this
+                        // // Current (jumps to file, code incorrectly labels it as viewDiff)
                         const uri = vscode.Uri.file(message.filePath);
                         const document = await vscode.workspace.openTextDocument(uri);
                         await vscode.window.showTextDocument(document);
+                        // // // Alt (actually show diff)
+                        // const originalUri = vscode.Uri.file(message.filePath);
+                        // const change = migrationState.getChange(originalUri);
+                        // if (change) {
+                        //     const updatedUri = vscode.Uri.parse(`libmig-preview:${originalUri.fsPath}`);
+                        //     const title = `${path.basename(originalUri.fsPath)} (Original ↔ Migrated)`;
+                        //     await vscode.commands.executeCommand('vscode.diff', originalUri, updatedUri, title);
+                        // }
                         break;
+
                     case 'applySingleChange':
                         await this.applySingleChange(
                             message.filePath,
-                            message.hunkId,
-                            message.editedContent
+                            message.hunkId
                         );
                         break;
-                    // case 'updateEditedContent': // (WIP/optional)
-                    //     const fileIndex = message.fileIndex;
-                    //     const filePath = changes[fileIndex].uri.fsPath;
-                    //     const hunkId = message.hunkId;
-
-                    //     if (!this.editedContents.has(filePath)) {
-                    //         this.editedContents.set(filePath, new Map());
-                    //     }
-
-                    //     this.editedContents.get(filePath)!.set(hunkId, message.content);
-                    //     break;
                 }
             }
         );
@@ -84,47 +82,40 @@ export class MigrationWebview {
                 if (!change) {continue;}
 
                 const doc = await vscode.workspace.openTextDocument(uri);
-                const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
+                const eol = DiffUtils.getDocumentEOL(doc);
                 const selectedHunkIds = new Set(file.selectedHunks);
                 const processedHunkIds = new Set<number>();
-
-                // // // Get edited content from Webview (WIP/optional)
-                // const editedContents = new Map<number, string[]>();
 
                 // // Sort hunks by line number to process them from top to bottom
                 const hunks = [...change.hunks].sort((a, b) => a.originalStartLine - b.originalStartLine);
 
-                for (let i = 0; i < hunks.length; i++) {
-                    const currentHunk = hunks[i];
-                    if (!selectedHunkIds.has(currentHunk.id) || processedHunkIds.has(currentHunk.id)) {continue;}
+                for (const hunk of hunks) {
+                    if (!selectedHunkIds.has(hunk.id) || processedHunkIds.has(hunk.id)) {continue;}
 
-                    // // Attempt to find a paired hunk for replacement
-                    if (currentHunk.type === 'removed' && i + 1 < hunks.length) {
-                        const nextHunk = hunks[i + 1];
-                        // // Check if the next hunk is an 'added' hunk at the same line and is also selected
-                        if (nextHunk.type === 'added' &&
-                            nextHunk.originalStartLine === currentHunk.originalStartLine &&
-                            selectedHunkIds.has(nextHunk.id))
-                        {
-                            // // Handle replacement operation
+                    const pairedHunk = DiffUtils.findPairedHunk(hunk, hunks);
+                    // // Replacement case
+                    if (pairedHunk) {
+                        if (selectedHunkIds.has(pairedHunk.id)) {
+                            const removalHunk = hunk.type === 'removed' ? hunk : pairedHunk;
+                            const additionHunk = hunk.type === 'added' ? hunk : pairedHunk;
                             const range = new vscode.Range(
-                                new vscode.Position(currentHunk.originalStartLine, 0),
-                                new vscode.Position(currentHunk.originalStartLine + currentHunk.lines.length, 0)
+                                new vscode.Position(removalHunk.originalStartLine, 0),
+                                new vscode.Position(removalHunk.originalStartLine + removalHunk.lines.length, 0)
                             );
-                            const newText = nextHunk.lines.join(eol) + (nextHunk.lines.length > 0 ? eol : '');
-
+                            const newText = DiffUtils.getReplacementText(additionHunk, doc);
                             edit.replace(uri, range, newText);
-
-                            // // Mark both hunks as processed
-                            processedHunkIds.add(currentHunk.id);
-                            processedHunkIds.add(nextHunk.id);
-                            continue; // Move to the next hunk
+                            processedHunkIds.add(hunk.id);
+                            processedHunkIds.add(pairedHunk.id);
+                        } else {
+                            migrationState.handleSingleHunk(edit, uri, hunk, eol, false);
+                            processedHunkIds.add(hunk.id);
                         }
                     }
-
-                    // // If it's not a replacement, handle it as a standalone hunk
-                    await migrationState.handleSingleHunk(edit, uri, currentHunk, eol, false);
-                    processedHunkIds.add(currentHunk.id);
+                    // // Standalone add/delete
+                    else {
+                        migrationState.handleSingleHunk(edit, uri, hunk, eol, false);
+                        processedHunkIds.add(hunk.id);
+                    }
                 }
             }
 
@@ -152,54 +143,27 @@ export class MigrationWebview {
         }
     }
 
-    private async applySingleChange(filePath: string, hunkId: number, editedContent: string): Promise<void> {
+    private async applySingleChange(filePath: string, hunkId: number): Promise<void> {
         try {
             const uri = vscode.Uri.file(filePath);
             const change = migrationState.getChange(uri);
             if (!change) {return;}
-            const hunk = change.hunks.find(h => h.id === hunkId);
-            if (!hunk) {return;}
+            const hunkToApply = change.hunks.find(h => h.id === hunkId);
+            if (!hunkToApply) {return;}
 
-            // // Find the paired removal hunk for this addition
-            let removalHunk: DiffHunk | undefined;
-            if (hunk.type === 'added') {
-                removalHunk = change.hunks.find(h =>
-                    h.type === 'removed' &&
-                    h.originalStartLine === hunk.originalStartLine
-                );
-            }
-
-            const edit = new vscode.WorkspaceEdit();
             const doc = await vscode.workspace.openTextDocument(uri);
             const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
-
-            // // Split the edited content into lines
-            const editedLines = editedContent.split(/\r?\n/);
-
-            if (removalHunk) {
-                // // Handle as a replacement
-                const range = new vscode.Range(
-                    new vscode.Position(removalHunk.originalStartLine, 0),
-                    new vscode.Position(removalHunk.originalStartLine + removalHunk.lines.length, 0)
-                );
-                const newText = editedLines.join(eol) + (editedLines.length > 0 ? eol : '');
-                edit.replace(uri, range, newText);
-            } else {
-                // // Handle as a simple insertion
-                const pos = new vscode.Position(hunk.originalStartLine, 0);
-                const newText = editedLines.join(eol) + (editedLines.length > 0 ? eol : '');
-                edit.insert(uri, pos, newText);
-            }
+            const pairedHunk = DiffUtils.findPairedHunk(hunkToApply, change.hunks);
+            const edit = DiffUtils.createHunkEdit(hunkToApply, uri, eol, pairedHunk, false);
 
             // // Apply the edit
             const success = await vscode.workspace.applyEdit(edit);
             if (success) {
                 // // Save the document
-                const doc = await vscode.workspace.openTextDocument(uri);
                 await doc.save();
-                logger.info(`Applied change at line ${hunk.originalStartLine + 1} in ${path.basename(filePath)}`);
+                logger.info(`Applied hunk ${hunkToApply.id} at line ${hunkToApply.originalStartLine + 1} in ${path.basename(filePath)}`);
             } else {
-                logger.error(`Failed to apply change at line ${hunk.originalStartLine + 1} in ${path.basename(filePath)}`);
+                logger.error(`Failed to apply hunk ${hunkToApply.id} at line ${hunkToApply.originalStartLine + 1} in ${path.basename(filePath)}`);
                 vscode.window.showErrorMessage("Failed to apply change");
             }
         } catch (error) {
@@ -315,14 +279,6 @@ export class MigrationWebview {
                 overflow-x: auto;
                 font-size: var(--vscode-editor-font-size);
             }
-            // .hunk-content.editable {
-            //     border: 1px solid var(--vscode-input-border);
-            //     background-color: var(--vscode-input-background);
-            //     color: var(--vscode-input-foreground);
-            // }
-            // .hunk-content.editable:focus {
-            //     outline: 1px solid var(--vscode-focusBorder);
-            // }
             .buttons {
                 display: flex;
                 justify-content: flex-end;
@@ -402,7 +358,6 @@ export class MigrationWebview {
     }
 
     private generateHunkItem(hunk: DiffHunk, fileIndex: number): string {
-        const isEditable = hunk.type === 'added'; // (WIP/optional)
         return `<div class="hunk-container" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
             <div class="hunk-header">
                 <input type="checkbox" class="hunk-checkbox"
@@ -411,13 +366,11 @@ export class MigrationWebview {
                 <span class="hunk-type ${hunk.type === 'added' ? 'hunk-type-added' : 'hunk-type-removed'}">
                     ${hunk.type === 'added' ? 'Added' : 'Removed'} at line ${hunk.originalStartLine + 1}
                 </span>
-                ${isEditable ?
-                    `<button class="apply-single-button" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
-                        Apply
-                    </button>` : ''}
+                <button class="apply-single-button" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
+                    Apply
+                </button>
             </div>
-            <div class="hunk-content ${isEditable ? 'editable' : ''}"
-                /* ${isEditable ? 'contenteditable="true"' : ''} */
+            <div class="hunk-content"
                 data-hunk-id="${hunk.id}"
                 data-file-index="${fileIndex}">
                 ${this.escapeHtml(hunk.lines.join('\n'))}
@@ -553,7 +506,7 @@ export class MigrationWebview {
                         const fileInfo = files[fileIndex];
                         const filePath = fileInfo.path;
 
-                        // // Get the (possibly) edited content from the editable div
+                        // // Get the content element to update style after applying
                         const contentElement = document.querySelector(
                             \`.hunk-content[data-hunk-id="\${hunkId}"][data-file-index="\${fileIndex}"]\`
                         );
@@ -564,7 +517,6 @@ export class MigrationWebview {
                             command: 'applySingleChange',
                             filePath: filePath,
                             hunkId: hunkId,
-                            editedContent: editedContent
                         });
 
                         // // Disable this button and update UI to show change was applied
@@ -577,20 +529,6 @@ export class MigrationWebview {
                         checkbox.disabled = true;
                     });
                 });
-
-                // // // Handle editable hunks in preview (WIP/optional)
-                // document.querySelectorAll('.hunk-content.editable').forEach(content => {
-                //     content.addEventListener('input', () => {
-                //         const hunkId = parseInt(content.getAttribute('data-hunk-id'));
-                //         const fileIndex = parseInt(content.getAttribute('data-file-index'));
-                //         vscode.postMessage({
-                //             command: 'updateEditedContent',
-                //             hunkId: hunkId,
-                //             fileIndex: fileIndex,
-                //             content: content.textContent
-                //         });
-                //     });
-                // });
             });
         </script>`;
     }
