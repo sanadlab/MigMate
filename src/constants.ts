@@ -1,8 +1,9 @@
+export const PLUGIN = 'libmig';
+
 // // Command IDs
 export const COMMANDS = {
     MIGRATE: 'libmig.migrate',
     VIEW_TEST_RESULTS: 'libmig.viewTestResults',
-    DIFF: 'libmig.viewDiff',
     HEALTH_CHECK: 'libmig.healthCheck',
     SET_API_KEY: 'libmig.setApiKey',
 };

@@ -49,11 +49,6 @@
         "category": "LibMig"
       },
       {
-        "command": "libmig.viewDiff",
-        "title": "Show Migration Preview",
-        "category": "LibMig"
-      },
-      {
         "command": "libmig.healthCheck",
         "title": "Check Health of CLI Tool",
         "category": "LibMig"

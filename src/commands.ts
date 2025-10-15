@@ -45,37 +45,6 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	// // Outdated diff view, keep for visual comparison
-	const viewDiffCommand = vscode.commands.registerCommand('libmig.viewDiff', async () => {
-		console.log('Viewing diff...');
-		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
-			vscode.window.showErrorMessage('No active editor found.');
-			return;
-		}
-		const originalText = editor.document.getText();
-		const updatedText = originalText.replace(/requests/g, 'httpx'); // hardcoded for now
-		const originalUri = vscode.Uri.parse('original:Original.py');
-		const updatedUri = vscode.Uri.parse('updated:Updated.py');
-
-		const originalProvider = vscode.workspace.registerTextDocumentContentProvider('original', {
-			provideTextDocumentContent: () => originalText,
-		});
-		const updatedProvider = vscode.workspace.registerTextDocumentContentProvider('updated', {
-			provideTextDocumentContent: () => updatedText,
-		});
-		context.subscriptions.push(originalProvider, updatedProvider);
-
-		await vscode.commands.executeCommand(
-			'vscode.diff',
-			originalUri,
-			updatedUri,
-			'Migration Preview: Split Diff'
-		);
-	});
-
-
-
 	// // Check CLI tool using '--help' flag, check config
 	const healthCheck = vscode.commands.registerCommand('libmig.healthCheck', () => {
 		exec('libmig --help', (err, stdout, stderr) => {
@@ -131,5 +100,5 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	context.subscriptions.push(migrateCommand, viewTestResultsCommand, viewDiffCommand, healthCheck, setAPI);
+	context.subscriptions.push(migrateCommand, viewTestResultsCommand, healthCheck, setAPI);
 }
