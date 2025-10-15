@@ -3,8 +3,6 @@ export const COMMANDS = {
     MIGRATE: 'libmig.migrate',
     VIEW_TEST_RESULTS: 'libmig.viewTestResults',
     DIFF: 'libmig.viewDiff',
-    BACKUP: 'libmig.backup',
-    RESTORE: 'libmig.restore',
     HEALTH_CHECK: 'libmig.healthCheck',
     SET_API_KEY: 'libmig.setApiKey',
 };
@@ -20,7 +18,7 @@ export const CONFIG = {
     MAX_FILES: 'flags.maxFileCount',
     // // Enums
     LLM_CLIENT: 'flags.LLMClient',
-    PREVIEW_STYLE: 'options.previewGrouping',
+    PREVIEW_STYLE: 'options.previewStyle',
     MIG_ROUNDS: 'flags.migrationRounds',
     // // Strings
     PYTHON_VERSION: 'flags.pythonVersion',

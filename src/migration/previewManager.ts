@@ -3,7 +3,6 @@ import * as path from 'path';
 import { migrationState, MigrationChange, DiffHunk } from './migrationState';
 import { configService } from '../services/config';
 import { telemetryService } from '../services/telemetry';
-import { codeLensProvider, InlineDiffProvider } from '../providers';
 import { logger } from '../services/logging';
 import { MigrationWebview } from './migrationWebview';
 
@@ -16,11 +15,9 @@ interface AppliedChange {
 }
 
 export class PreviewManager {
-    private inlineDiffProvider: InlineDiffProvider;
     private migrationWebview: MigrationWebview;
 
     constructor() {
-        this.inlineDiffProvider = new InlineDiffProvider();
         this.migrationWebview = new MigrationWebview();
     }
 
@@ -33,13 +30,11 @@ export class PreviewManager {
         migrationState.loadChanges(changes);
 
         // // Show preview based on mode selected in config
-        const previewMode = configService.get<string>('options.previewGrouping');
+        const previewMode = configService.get<string>('options.previewStyle');
         logger.info(`Using preview mode: ${previewMode}`);
 
-        if (previewMode === 'webview') {
-            await this.migrationWebview.showPreview(migrationState.getChanges(), srcLib, tgtLib);
-        } else if (previewMode === 'All at once') {
-            const appliedChanges = await this.showGroupedPreview();
+        if (previewMode === 'Refactor Preview') {
+            const appliedChanges = await this.showRefactorPreview();
             console.log("Applied changes:", appliedChanges);
             if (appliedChanges) {
                 const totalApplied = appliedChanges.reduce((sum, change) => sum + change.appliedHunks, 0);
@@ -54,13 +49,17 @@ export class PreviewManager {
                     appliedFiles: appliedChanges.map(c => path.basename(c.filePath)).join(',')
                 });
             }
+        } else if (previewMode === 'Webview') {
+            telemetryService.sendTelemetryEvent('migrationPreview', { style: 'webview' }); // check this
+            await this.migrationWebview.showPreview(migrationState.getChanges(), srcLib, tgtLib);
         } else {
-            this.showInlinePreview();
+            logger.error(`Unrecognized preview style: ${previewMode}`);
+            vscode.window.showErrorMessage("Unrecognized preview style. Please check plugin configuration.");
         }
     }
 
-    private async showGroupedPreview(): Promise<AppliedChange[] | undefined> {
-        telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'grouped' });
+    private async showRefactorPreview(): Promise<AppliedChange[] | undefined> {
+        telemetryService.sendTelemetryEvent('migrationPreview', { style: 'refactor' });
         const edit = new vscode.WorkspaceEdit();
         const fileInfo = new Map<string, { eol: string; endsWithEol: boolean; lineCount: number }>();
         const loadedChanges = migrationState.getChanges();
@@ -248,25 +247,8 @@ export class PreviewManager {
                 logger.warn(`Failed to analyze changes for ${path.basename(filePath)}: ${error}`);
             }
         }
-
-        // // Clean everything up
         migrationState.clear();
-        codeLensProvider.refresh();
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-            this.inlineDiffProvider.clearDecorations(editor);
-        }
         return appliedChanges;
-    }
-
-    private showInlinePreview(): void { // leave for now, might remove // check this
-        telemetryService.sendTelemetryEvent('migrationPreview', { mode: 'inline' });
-        vscode.window.visibleTextEditors.forEach(editor => {
-            if (migrationState.getChange(editor.document.uri)) {
-                this.inlineDiffProvider.showDecorations(editor);
-            }
-        });
-        codeLensProvider.refresh();
     }
 
     private isHunkApplied(hunk: DiffHunk, beforeContent: string, afterContent: string): boolean {

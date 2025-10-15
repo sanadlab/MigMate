@@ -54,16 +54,6 @@
         "category": "LibMig"
       },
       {
-        "command": "libmig.backup",
-        "title": "Backup a File Before Migrating",
-        "category": "LibMig"
-      },
-      {
-        "command": "libmig.restore",
-        "title": "Restore a Migrated File",
-        "category": "LibMig"
-      },
-      {
         "command": "libmig.healthCheck",
         "title": "Check Health of CLI Tool",
         "category": "LibMig"
@@ -119,19 +109,17 @@
             "default": "gpt-4o-mini",
             "description": "Select an LLM client to use for migrations"
           },
-          "libmig.options.previewGrouping": {
+          "libmig.options.previewStyle": {
             "type": "string",
             "enum": [
-              "One-by-one",
-              "All at once",
-              "webview"
+              "Refactor Preview",
+              "Webview"
             ],
             "enumDescriptions": [
-              "View files one-at-a-time",
-              "Use VS Code's built-in Refactor Preview",
-              "Use an experimental webview"
+              "Use VS Code's built-in Refactor Preview window",
+              "Use an experimental Webview"
             ],
-            "default": "One-by-one",
+            "default": "Refactor Preview",
             "description": "Choose how migrated files are shown during preview"
           },
           "libmig.flags.migrationRounds": {
@@ -200,8 +188,8 @@
     "views": {
       "libmig-view": [
         {
-          "id": "libmig-libraries",
-          "name": "Detected Libraries"
+          "id": "libmig-tree",
+          "name": "Tree View"
         },
         {
           "id": "libmig-results",

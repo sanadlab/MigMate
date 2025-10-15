@@ -1,18 +1,10 @@
 import * as vscode from 'vscode';
-import { migrationState, MigrationChange } from './migration/migrationState';
 import { configService } from './services/config';
-import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from './services/librariesApi';
-import { runCliTool, buildCliCommand } from './services/cli';
-import { exec, execSync } from 'child_process';
+import { exec } from 'child_process';
 import { telemetryService } from './services/telemetry';
 import { logger } from './services/logging';
-import { codeLensProvider, InlineDiffProvider } from './providers';
 import { checkTestResults, showTestResultsDetail } from './services/testResults';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
-
 import { COMMANDS } from './constants';
 import { MigrationService } from './migration/migrationService';
 import { MigrationWebview } from './migration/migrationWebview';
@@ -21,7 +13,6 @@ import { MigrationWebview } from './migration/migrationWebview';
 
 
 export function registerCommands(context: vscode.ExtensionContext) {
-    const inlineDiffProvider = new InlineDiffProvider(); // might remove // check this
 	const migrationService = new MigrationService(context);
 
 
@@ -50,26 +41,6 @@ export function registerCommands(context: vscode.ExtensionContext) {
 	const viewWebviewCommand = vscode.commands.registerCommand('libmig.viewWebview', async () => {
 		const webview = new MigrationWebview();
 		await webview.showPreview([], 'requests', 'httpx');
-	});
-
-
-
-	// // Hunk commands for inline preview
-	const acceptHunkCommand = vscode.commands.registerCommand('libmig.acceptHunk', async (uri: vscode.Uri, hunkId: number) => {
-		const hunk = migrationState.getHunks(uri).find(h => h.id === hunkId);
-		if (!hunk || hunk.status !== 'pending') {return;}
-		hunk.status = 'accepted';
-		// workspace edit
-		inlineDiffProvider.showDecorations(vscode.window.activeTextEditor!);
-		codeLensProvider.refresh();
-	});
-	const rejectHunkCommand = vscode.commands.registerCommand('libmig.rejectHunk', async (uri: vscode.Uri, hunkId: number) => {
-		const hunk = migrationState.getHunks(uri).find(h => h.id === hunkId);
-		if (!hunk || hunk.status !== 'pending') {return;}
-		hunk.status = 'rejected';
-		// workspace edit
-		inlineDiffProvider.showDecorations(vscode.window.activeTextEditor!);
-		codeLensProvider.refresh();
 	});
 
 
@@ -105,35 +76,8 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	// // WIP file backup and restore (look into alternate methods)
-	let backupContent: string | undefined;
-	const backupCommand = vscode.commands.registerCommand('libmig.backup', () => {
-		const editor = vscode.window.activeTextEditor;
-		if (editor) {
-			backupContent = editor.document.getText();
-			vscode.window.showInformationMessage('Backup created.');
-		}
-	});
-	const restoreCommand = vscode.commands.registerCommand('libmig.restore', async () => {
-		const editor = vscode.window.activeTextEditor;
-		if (editor && backupContent) {
-			const edit = new vscode.WorkspaceEdit();
-			const fullRange = new vscode.Range(
-				editor.document.positionAt(0),
-				editor.document.positionAt(editor.document.getText().length)
-			);
-			edit.replace(editor.document.uri, fullRange, backupContent);
-			await vscode.workspace.applyEdit(edit);
-			vscode.window.showInformationMessage('Backup restored.');
-		}
-	});
-
-
-
 	// // Check CLI tool using '--help' flag, check config
 	const healthCheck = vscode.commands.registerCommand('libmig.healthCheck', () => {
-		const libmigFlags = [configService.get<boolean>('flags.forceRerun')];
-		if (libmigFlags[0] !== null) {console.log("Force rerun flag:", libmigFlags[0]);}
 		exec('libmig --help', (err, stdout, stderr) => {
 			if (err) {
 				vscode.window.showErrorMessage(`Error: ${err.message}`);
@@ -173,17 +117,19 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		if (apiKey !== undefined) {
 			if (apiKey.length > 0) {
 				await context.secrets.store(selectedService.id, apiKey);
-				vscode.window.showInformationMessage(`API key set for: ${selectedService.label}`);
 				console.log(`Set API key for ${selectedService.label}`);
+				logger.info(`Set API key for ${selectedService.label}`);
+				vscode.window.showInformationMessage(`API key set for: ${selectedService.label}`);
 			} else {
 				await context.secrets.delete(selectedService.id);
-				vscode.window.showInformationMessage(`API key cleared for: ${selectedService.label}`);
 				console.log(`Cleared API key for ${selectedService.label}`);
+				logger.info(`Cleared API key for ${selectedService.label}`);
+				vscode.window.showInformationMessage(`API key cleared for: ${selectedService.label}`);
 			}
 		}
 	});
 
 
 
-	context.subscriptions.push(migrateCommand, viewTestResultsCommand, acceptHunkCommand, rejectHunkCommand, viewDiffCommand, backupCommand, restoreCommand, healthCheck, setAPI);
+	context.subscriptions.push(migrateCommand, viewTestResultsCommand, viewDiffCommand, healthCheck, setAPI);
 }
