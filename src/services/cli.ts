@@ -2,11 +2,12 @@ import * as vscode from 'vscode';
 import { spawn } from 'child_process';
 import { configService } from './config';
 import { logger } from './logging';
+import { CONFIG, PLUGIN_TITLE } from '../constants';
 
 
 
 // // Run target command in CLI
-export function runCliTool(command: string, cwd: string) {
+export function runCliTool(command: string, cwd: string, env: NodeJS.ProcessEnv = {}) {
     logger.show();
     logger.info(`Running command in ${cwd}: ${command}`);
 
@@ -16,7 +17,8 @@ export function runCliTool(command: string, cwd: string) {
     // check this
     return new Promise<void>((resolve, reject) => {
         const [cmd, ...args] = command.split(' ');
-        const child = spawn(cmd, args, { cwd, shell: true });
+        const migrationEnv = { ...process.env, ...env };
+        const child = spawn(cmd, args, { cwd, shell: true, env: migrationEnv });
 
         child.stdout.on('data', (data: Buffer) => {
             logger.append(data.toString());
@@ -27,10 +29,10 @@ export function runCliTool(command: string, cwd: string) {
         child.on('close', (code) => {
             logger.info(`Command finished with exit code: ${code}`);
             if (code === 0) {
-                vscode.window.showInformationMessage('LibMig process completed successfully');
+                vscode.window.showInformationMessage(`${PLUGIN_TITLE} process completed successfully`);
                 resolve();
             } else {
-                const err = new Error(`Process failed with exit code ${code}`);
+                const err = new Error(`${PLUGIN_TITLE} process failed with exit code ${code}`);
                 logger.error(err.message, err);
                 vscode.window.showErrorMessage(err.message);
                 reject(err);
@@ -45,7 +47,6 @@ export function runCliTool(command: string, cwd: string) {
 }
 
 export function buildCliCommand(srcLib: string, tgtLib: string): string {
-    // // New construction of CLI command (WIP)
     const commandParts = ['libmig', srcLib, tgtLib];
 
     // // Only add flags that differ from their default value
@@ -53,14 +54,13 @@ export function buildCliCommand(srcLib: string, tgtLib: string): string {
         const details = configService.inspect(key);
         const currentValue = configService.get(key);
 
-        if (details && currentValue !== undefined && currentValue !== details.defaultValue) { // skip if undefined or default value
+        // Skip if flag is undefined or default value, ignore empty strings
+        if (details && currentValue !== undefined && currentValue !== details.defaultValue) {
             if (typeof currentValue === 'boolean') {
-                if (currentValue === true) { // only add True booleans
-                    commandParts.push(cliFlag);
-                }
+                commandParts.push(cliFlag); // Apparently the boolean flags are toggles --> don't take values
             }
-            else if (currentValue !== '') { // ignore empty strings
-                if (Array.isArray(currentValue) && currentValue.length > 0) { // currently only for migrationRounds // check this to see Integer vs Array
+            else if (currentValue !== '') {
+                if (Array.isArray(currentValue) && currentValue.length > 0) { // currently only for migrationRounds
                     currentValue.forEach(subValue => {
                         commandParts.push(`${cliFlag}=${subValue}`);
                     });
@@ -72,17 +72,25 @@ export function buildCliCommand(srcLib: string, tgtLib: string): string {
         }
     };
 
+    const addFlagAlways = (key: string, cliFlag: string) => {
+        const currentValue = configService.get(key);
+        if (currentValue !== undefined && currentValue !== '') {
+            commandParts.push(`${cliFlag}=${currentValue}`);
+        }
+    };
+
     // // Add all of the relevant flags
-    addFlag('flags.pythonVersion', '--python-version');
-    addFlag('flags.forceRerun', '--force-rerun');
-    addFlag('flags.smartSkipTests', '--smart-skip-tests');
-    addFlag('flags.maxFileCount', '--max-files');
-    addFlag('flags.LLMClient', '--llm');
-    addFlag('flags.migrationRounds', '--rounds');
-    addFlag('flags.repositoryName', '--repo');
-    addFlag('flags.testSuitePath', '--test-root');
-    addFlag('flags.outputPath', '--output-path');
-    addFlag('flags.requirementFilePath', '--requirements-file-path');
+    addFlag(CONFIG.REPO_NAME, '--repo'); // string, default=None
+    addFlag(CONFIG.REQ_FILE, '--requirements-file-path'); // string (path), default='.'
+    addFlag(CONFIG.TEST_ROOT, '--test-root'); // string (path), default=None --> checks './requirements.txt'
+    addFlag(CONFIG.OUTPUT_PATH, '--output-path'); // string (path), default='.libmig'
+    addFlag(CONFIG.MAX_FILES, '--max-files'); // int, default=20
+    addFlag(CONFIG.PYTHON_VERSION, '--python-version'); // string, default=None
+    addFlag(CONFIG.USE_CACHE, '--use-cache'); // bool, default=True
+    addFlag(CONFIG.FORCE_RERUN, '--force-rerun'); // bool, default=False
+    addFlag(CONFIG.SKIP_TESTS, '--smart-skip-tests'); // bool, default=False
+    addFlagAlways(CONFIG.LLM_CLIENT, '--llm'); // string, default=None --> uses GPT-4o mini by default
+    addFlag(CONFIG.MIG_ROUNDS, '--rounds'); // list[str], default=None
 
     return commandParts.join(' ');
 }
