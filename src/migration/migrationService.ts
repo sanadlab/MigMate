@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getLibrariesFromRequirements, getSourceLibrary, getTargetLibrary } from '../services/librariesApi';
-import { checkTestResults, showTestResultsDetail } from '../services/testResults';
+import { checkTestResults, showTestResultsView } from '../services/testResultWebview';
 import { logger } from '../services/logging';
 import { telemetryService } from '../services/telemetry';
 import { EnvironmentManager } from './environmentManager';
@@ -95,7 +95,7 @@ export class MigrationService {
                     viewDetailsAction
                 );
                 if (response === viewDetailsAction) {
-                    showTestResultsDetail(testResults);
+                    showTestResultsView(testResults);
                 }
             }
             // // Compare files and show preview
@@ -137,7 +137,7 @@ export class MigrationService {
                     viewDetailsAction
                 );
                 if (response === viewDetailsAction) {
-                    showTestResultsDetail(testResults);
+                    showTestResultsView(testResults);
                 }
             }
 

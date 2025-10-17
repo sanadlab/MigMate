@@ -3,7 +3,7 @@ import { configService } from './services/config';
 import { exec } from 'child_process';
 import { telemetryService } from './services/telemetry';
 import { logger } from './services/logging';
-import { checkTestResults, showTestResultsDetail } from './services/testResults';
+import { checkTestResults, showTestResultsView } from './services/testResultWebview';
 import * as fs from 'fs';
 import { COMMANDS } from './constants';
 import { MigrationService } from './migration/migrationService';
@@ -32,7 +32,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 			return;
 		}
 		const testResults = await checkTestResults(resultsDir);
-		showTestResultsDetail(testResults);
+		showTestResultsView(testResults);
 	});
 
 

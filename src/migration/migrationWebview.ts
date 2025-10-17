@@ -3,6 +3,7 @@ import * as path from 'path';
 import { MigrationChange, DiffHunk, migrationState } from './migrationState';
 import { logger } from '../services/logging';
 import { DiffUtils } from './diffUtils';
+import { escapeHtml } from '../webviewUtils';
 
 export class MigrationWebview {
     private panel: vscode.WebviewPanel | undefined;
@@ -30,7 +31,7 @@ export class MigrationWebview {
         }
 
         // // Generate HTML
-        this.panel.webview.html = this.generatePreviewHtml(changes, srcLib, tgtLib);
+        this.panel.webview.html = await this.generatePreviewHtml(changes, srcLib, tgtLib);
 
         // // Handle messages from Webview
         this.panel.webview.onDidReceiveMessage(
@@ -127,7 +128,7 @@ export class MigrationWebview {
             // // Apply the edits
             const success = await vscode.workspace.applyEdit(edit);
             if (success) {
-                // Save all modified documents
+                // // Save all modified documents
                 const docsToSave = new Set<string>();
                 for (const file of selectedFiles) {
                     docsToSave.add(file.path);
@@ -201,12 +202,14 @@ export class MigrationWebview {
 
 
     // // HTML Generation Methods
-    private generatePreviewHtml(changes: MigrationChange[], srcLib: string, tgtLib: string): string {
+    private async generatePreviewHtml(changes: MigrationChange[], srcLib: string, tgtLib: string): Promise<string> {
         // // Create the files data structure and stringify it safely
         const filesData = JSON.stringify(changes.map(change => ({
             path: change.uri.fsPath,
             hunks: change.hunks.map(hunk => hunk.id)
         }))).replace(/`/g, '\\`');
+
+        const fileItemsHtml = (await Promise.all(changes.map((change, fileIndex) => this.generateFileItem(change, fileIndex)))).join('');
 
         return `<!DOCTYPE html>
         <html lang="en">
@@ -218,8 +221,11 @@ export class MigrationWebview {
         </head>
         <body>
             ${this.generateHeader(srcLib, tgtLib, changes.length)}
-            ${this.generateFilesList(changes)}
-            ${this.generateButtons()}
+            <div class="files-list">${fileItemsHtml}</div>
+            <div class="buttons">
+                <button class="cancel-button">Close Preview</button>
+                <button class="apply-all-button">Apply All Changes</button>
+            </div>
             ${this.generateScript(filesData)}
         </body>
         </html>`;
@@ -303,12 +309,11 @@ export class MigrationWebview {
                 display: flex;
                 gap: 5px;
             }
-            .apply-file-button {
-                margin-left: 10px;
+            .apply-file-button, .apply-all-button {
                 background: var(--vscode-button-background);
                 color: var(--vscode-button-foreground);
                 border: none;
-                padding: 4px 8px;
+                padding: 8px 16px;
                 border-radius: 3px;
                 cursor: pointer;
             }
@@ -369,6 +374,8 @@ export class MigrationWebview {
                 display: flex;
                 justify-content: flex-end;
                 margin-top: 20px;
+                padding-top: 10px;
+                border-top: 1px solid var(--vscode-panel-border);
                 gap: 10px;
             }
             .apply-single-button {
@@ -397,9 +404,6 @@ export class MigrationWebview {
                 border-radius: 3px;
                 cursor: pointer;
             }
-            .select-all-checkbox {
-                margin-bottom: 10px;
-            }
         </style>`;
     }
 
@@ -420,105 +424,116 @@ export class MigrationWebview {
                     <span class="info-value">${filesCount}</span>
                 </div>
             </div>
-            <div class="select-all-checkbox">
-                <input type="checkbox" id="select-all" checked>
-                <label for="select-all">Select All Changes</label>
-            </div>
         </div>`;
     }
 
-    private generateFilesList(changes: MigrationChange[]): string {
-        const fileItems = changes.map((change, fileIndex) =>
-            this.generateFileItem(change, fileIndex)
-        ).join('');
-
-        return `<div class="files-list">${fileItems}</div>`;
+    private async generateFilesList(changes: MigrationChange[]): Promise<string> {
+        const fileItems = await Promise.all(changes.map((change, fileIndex) => this.generateFileItem(change, fileIndex)));
+        return `<div class="files-list">${fileItems.join('')}</div>`;
     }
 
-    private generateFileItem(change: MigrationChange, fileIndex: number): string {
-        const hunks = change.hunks;
-        const processedHunkIds = new Set<number>();
-        let hunksHtml = '';
-        const totalChanges = change.hunks.filter(h => h.type === 'removed').length + change.hunks.filter(h => h.type === 'added' && !h.pairedHunkId).length;
+    private async generateFileItem(change: MigrationChange, fileIndex: number): Promise<string> {
+        try {
+            const filePath = change.uri.fsPath;
+            const doc = await vscode.workspace.openTextDocument(change.uri);
+            const fileContent = doc.getText();
+            const fileLines = fileContent.split(/\r?\n/);
+            const lineDetails: { [key: number]: { type: string, hunkIds: number[], content?: string } } = {};
+            const hunks = change.hunks;
 
-        // Pre-process hunks to group pairs into replacements
-        for (const hunk of hunks) {
-            if (processedHunkIds.has(hunk.id)) {
-                continue;
+            // // Handle removals first
+            for (const hunk of hunks) {
+                if (hunk.type === 'removed') {
+                    for (let i = 0; i < hunk.lines.length; i++) {
+                        const lineNum = hunk.originalStartLine + i;
+                        lineDetails[lineNum] = { type: 'removed', hunkIds: [hunk.id] };
+                    }
+                }
             }
-            const pairedHunk = DiffUtils.findPairedHunk(hunk, hunks);
-            if (pairedHunk) {
-                // Replacement --> render a single block for the pair
-                const removalHunk = hunk.type === 'removed' ? hunk : pairedHunk;
-                const additionHunk = hunk.type === 'added' ? hunk : pairedHunk;
-                hunksHtml += this.generateReplacementHunkItem(removalHunk, additionHunk, fileIndex);
-                processedHunkIds.add(removalHunk.id);
-                processedHunkIds.add(additionHunk.id);
-            } else {
-                // Standlone add/remove
-                hunksHtml += this.generateSingleHunkItem(hunk, fileIndex);
-                processedHunkIds.add(hunk.id);
+
+            // // Handle additions and check if part of a replacement
+            for (const hunk of hunks) {
+                if (hunk.type === 'added') {
+                    const pairedHunk = DiffUtils.findPairedHunk(hunk, hunks);
+                    if (pairedHunk) {
+                        // // Replacement case
+                        const targetLine = pairedHunk.originalStartLine;
+                        if (lineDetails[targetLine]) {
+                            lineDetails[targetLine].type = 'replaced';
+                            lineDetails[targetLine].hunkIds.push(hunk.id);
+                            lineDetails[targetLine].content = hunk.lines.join('\n');
+                        }
+                    } else {
+                        // // Standalone addition
+                        const targetLine = hunk.originalStartLine;
+                        lineDetails[targetLine] = {
+                            type: 'added',
+                            hunkIds: [hunk.id],
+                            content: hunk.lines.join('\n')
+                        };
+                    }
+                }
             }
+
+            let contentHtml = '<div class="file-content">';
+            let i = 0;
+            while (i < fileLines.length) {
+                if (lineDetails[i]) {
+                    const detail = lineDetails[i];
+                    const hunkIds = detail.hunkIds.join(',');
+
+                    contentHtml += `<div class="change-region">`;
+                    contentHtml += `<div class="change-region-actions">
+                        <button class="apply-change-button" data-file-index="${fileIndex}" data-hunk-ids="${hunkIds}">
+                            Apply This Change
+                        </button>
+                    </div>`;
+
+                    if (detail.type === 'removed' || detail.type === 'replaced') {
+                        // // Group all consecutive removed lines
+                        let endLine = i;
+                        while(lineDetails[endLine + 1] && lineDetails[endLine + 1].type === 'removed') {
+                            endLine++;
+                        }
+                        for (let j = i; j <= endLine; j++) {
+                            contentHtml += `<div class="line line-removed">${escapeHtml(fileLines[j] || '')}</div>`;
+                        }
+                        i = endLine;
+                    }
+
+                    if (detail.type === 'added' || detail.type === 'replaced') {
+                        const lines = detail.content?.split('\n') || [];
+                        for (const line of lines) {
+                            contentHtml += `<div class="line line-added">${escapeHtml(line)}</div>`;
+                        }
+                    }
+                    contentHtml += `</div>`;
+                } else {
+                    contentHtml += `<div class="line">${escapeHtml(fileLines[i] || '')}</div>`;
+                }
+                i++;
+            }
+            contentHtml += '</div>';
+
+            const totalChanges = Object.keys(lineDetails).length;
+
+            return `<details class="file-item" data-file-path="${filePath}" data-file-index="${fileIndex}" open>
+                <summary class="file-header">
+                    <span class="file-path">${path.basename(filePath)}</span>
+                    <span class="dropdown-arrow"></span>
+                    <span class="file-summary" data-file-index="${fileIndex}">${totalChanges} changes</span>
+                    <div class="file-header-buttons">
+                        <button class="jump-to-file-button" data-file-path="${filePath}">View File</button>
+                        <button class="view-diff-button" data-file-path="${filePath}">View Diff</button>
+                    </div>
+                    <button class="apply-file-button" data-file-path="${filePath}">Apply File Changes</button>
+                </summary>
+                ${contentHtml}
+            </details>`;
+        } catch (error) {
+            logger.error(`Error generating file item HTML for ${change.uri.fsPath}: ${error}`);
+            return `<div class="file-item error">Could not load preview for ${path.basename(change.uri.fsPath)}.</div>`;
         }
-        return `<details class="file-item" data-file-path="${change.uri.fsPath}" data-file-index="${fileIndex}" open>
-            <summary class="file-header">
-                <input type="checkbox" class="file-checkbox" data-file-index="${fileIndex}" checked>
-                <span class="file-path">${path.basename(change.uri.fsPath)}</span>
-                <span class="dropdown-arrow"></span>
-                <span class="file-summary" data-file-index="${fileIndex}">${totalChanges} changes</span>
-                <div class="file-header-buttons">
-                    <button class="jump-to-file-button" data-file-path="${change.uri.fsPath}">View File</button>
-                    <button class="view-diff-button" data-file-path="${change.uri.fsPath}">View Diff</button>
-                </div>
-                <button class="apply-file-button" data-file-path="${change.uri.fsPath}">Apply File Changes</button>
-            </summary>
-            <div class="hunks">
-                ${hunksHtml}
-            </div>
-        </details>`;
-    }
-
-    private generateSingleHunkItem(hunk: DiffHunk, fileIndex: number): string {
-        return `<div class="hunk-container" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
-            <div class="hunk-header">
-                <input type="checkbox" class="hunk-checkbox"
-                    data-hunk-id="${hunk.id}"
-                    data-file-index="${fileIndex}" checked>
-                <span class="hunk-type ${hunk.type === 'added' ? 'hunk-type-added' : 'hunk-type-removed'}">
-                    ${hunk.type === 'added' ? 'Added' : 'Removed'} at line ${hunk.originalStartLine + 1}
-                </span>
-                <button class="apply-single-button" data-hunk-id="${hunk.id}" data-file-index="${fileIndex}">
-                    Apply
-                </button>
-            </div>
-            <div class="hunk-content ${hunk.type === 'added' ? 'hunk-content-added' : 'hunk-content-removed'}">${this.escapeHtml(hunk.lines.join('\n'))}</div>
-        </div>`;
-    }
-
-    private generateReplacementHunkItem(removalHunk: DiffHunk, additionHunk: DiffHunk, fileIndex: number): string {
-        const hunkIds = `${removalHunk.id},${additionHunk.id}`;
-        return `<div class="hunk-container" data-hunk-id="${hunkIds}" data-file-index="${fileIndex}">
-            <div class="hunk-header">
-                <input type="checkbox" class="hunk-checkbox"
-                    data-hunk-id="${hunkIds}"
-                    data-file-index="${fileIndex}" checked>
-                <span class="hunk-type hunk-type-replaced">
-                    Replaced at line ${removalHunk.originalStartLine + 1}
-                </span>
-                <button class="apply-single-button" data-hunk-id="${hunkIds}" data-file-index="${fileIndex}">
-                    Apply
-                </button>
-            </div>
-            <div class="hunk-content hunk-content-removed">${this.escapeHtml(removalHunk.lines.join('\n'))}</div>
-            <div class="hunk-content hunk-content-added">${this.escapeHtml(additionHunk.lines.join('\n'))}</div>
-        </div>`;
-    }
-
-    private generateButtons(): string {
-        return `<div class="buttons">
-            <button class="cancel-button">Close Preview</button>
-            <button class="apply-button">Apply Selected Changes</button>
-        </div>`;
     }
 
     private generateScript(filesJson: string): string {
@@ -526,72 +541,16 @@ export class MigrationWebview {
             // // Log the state of the Webview
             function debugState() {
                 console.log('Total file items:', document.querySelectorAll('.file-item').length);
-                console.log('Total file checkboxes:', document.querySelectorAll('.file-checkbox').length);
-                console.log('Checked file checkboxes:', document.querySelectorAll('.file-checkbox:checked').length);
-                console.log('Total hunk checkboxes:', document.querySelectorAll('.hunk-checkbox').length);
-                console.log('Checked hunk checkboxes:', document.querySelectorAll('.hunk-checkbox:checked').length);
-                console.log('Select all checked:', document.getElementById('select-all').checked);
             }
 
-            // // Get VS Code API
             const vscode = acquireVsCodeApi();
-
-            // // Track all selected hunks
             const files = ${filesJson};
 
-            // // Function to update the "select all" checkbox state based on all other checkboxes
-            function updateSelectAllState() {
-                const allCheckboxes = document.querySelectorAll('.hunk-checkbox, .file-checkbox');
-                const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
-                document.getElementById('select-all').checked = allChecked;
-            }
-
-            // // Listen for checkbox changes
             document.addEventListener('DOMContentLoaded', () => {
-                // // Handle select all checkbox
-                const selectAllCheckbox = document.getElementById('select-all');
-                selectAllCheckbox.addEventListener('change', () => {
-                    const isChecked = selectAllCheckbox.checked;
-                    document.querySelectorAll('.file-checkbox, .hunk-checkbox').forEach(checkbox => {
-                        checkbox.checked = isChecked;
-                    });
-                });
-
-                // // Handle file checkboxes
-                document.querySelectorAll('.file-checkbox').forEach(checkbox => {
-                    checkbox.addEventListener('change', () => {
-                        const fileIndex = parseInt(checkbox.getAttribute('data-file-index'));
-                        const isChecked = checkbox.checked;
-
-                        // // Update all hunks in this file
-                        document.querySelectorAll('.hunk-checkbox[data-file-index="' + fileIndex + '"]').forEach(hunkCheckbox => {
-                            hunkCheckbox.checked = isChecked;
-                        });
-
-                        // // Update the "select all" checkbox state
-                        updateSelectAllState();
-                    });
-                });
-
-                // // Handle hunk checkboxes
-                document.querySelectorAll('.hunk-checkbox').forEach(checkbox => {
-                    checkbox.addEventListener('change', () => {
-                        // // Check if all hunks in file are selected/deselected
-                        const fileIndex = parseInt(checkbox.getAttribute('data-file-index'));
-                        const fileCheckbox = document.querySelector('.file-checkbox[data-file-index="' + fileIndex + '"]');
-                        const allHunkCheckboxes = document.querySelectorAll('.hunk-checkbox[data-file-index="' + fileIndex + '"]');
-                        const allChecked = Array.from(allHunkCheckboxes).every(cb => cb.checked);
-
-                        fileCheckbox.checked = allChecked;
-
-                        // // Update the global select-all checkbox
-                        updateSelectAllState();
-                    });
-                });
-
                 // // Handle jump to file buttons
                 document.querySelectorAll('.jump-to-file-button').forEach(button => {
-                    button.addEventListener('click', () => {
+                    button.addEventListener('click', (e) => {
+                        e.preventDefault();
                         const filePath = button.getAttribute('data-file-path');
                         vscode.postMessage({
                             command: 'jumpToFile',
@@ -602,7 +561,8 @@ export class MigrationWebview {
 
                 // // Handle view diff buttons
                 document.querySelectorAll('.view-diff-button').forEach(button => {
-                    button.addEventListener('click', () => {
+                    button.addEventListener('click', (e) => {
+                        e.preventDefault();
                         const filePath = button.getAttribute('data-file-path');
                         vscode.postMessage({
                             command: 'viewDiff',
@@ -613,39 +573,56 @@ export class MigrationWebview {
 
                 // // Handle apply file changes buttons
                 document.querySelectorAll('.apply-file-button').forEach(button => {
-                    button.addEventListener('click', () => {
+                   button.addEventListener('click', (e) => {
+                        e.preventDefault();
                         const filePath = button.getAttribute('data-file-path');
                         vscode.postMessage({
                             command: 'applyFileChanges',
                             filePath
                         });
+
+                        // // Visually disable the file item
+                        const fileItem = button.closest('.file-item');
+                        if (fileItem) {
+                            fileItem.style.opacity = '0.6';
+                            fileItem.querySelectorAll('button').forEach(btn => btn.disabled = true);
+                        }
                     });
                 });
 
-                // // Handle apply button
-                document.querySelector('.apply-button').addEventListener('click', () => {
-                    console.log('Apply button clicked');
-                    debugState();
-                    const selectedFiles = files.map((file, index) => {
-                        // // Find the parent file container
-                        const fileContainer = document.querySelector('.file-item[data-file-index="' + index + '"]');
-                        if (!fileContainer) return null;
-
-                        const selectedHunks = file.hunks.filter(hunkId => {
-                            // // Find the checkbox within the specific file container
-                            const checkbox = fileContainer.querySelector('.hunk-checkbox[data-hunk-id="' + hunkId + '"]');
-                            return checkbox && checkbox.checked;
-                        });
-
-                        return {
-                            path: file.path,
-                            selectedHunks
-                        };
-                    }).filter(file => file && file.selectedHunks.length > 0);
+                // // Handle apply all changes button
+                document.querySelector('.apply-all-button').addEventListener('click', () => {
+                    const allFiles = files.map(file => ({
+                        path: file.path,
+                        selectedHunks: file.hunks
+                    }));
 
                     vscode.postMessage({
                         command: 'applyChanges',
-                        files: selectedFiles
+                        files: allFiles
+                    });
+                });
+
+                // // Handle apply change buttons
+                document.querySelectorAll('.apply-change-button').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const hunkIds = button.getAttribute('data-hunk-ids').split(',').map(id => parseInt(id));
+                        const fileIndex = parseInt(button.getAttribute('data-file-index'));
+                        const filePath = files[fileIndex].path;
+
+                        vscode.postMessage({
+                            command: 'applySingleChange',
+                            filePath: filePath,
+                            hunkId: hunkIds[0],
+                        });
+
+                        button.disabled = true;
+                        button.textContent = 'Applied';
+                        const region = button.closest('.change-region');
+                        if (region) {
+                            region.style.opacity = '0.6';
+                        }
                     });
                 });
 
@@ -655,49 +632,7 @@ export class MigrationWebview {
                         command: 'cancel'
                     });
                 });
-
-                // // Handle individual apply buttons
-                document.querySelectorAll('.apply-single-button').forEach(button => {
-                    button.addEventListener('click', () => {
-                        // The hunkId can now be a single ID or a comma-separated pair
-                        const hunkIdString = button.getAttribute('data-hunk-id');
-                        const fileIndex = parseInt(button.getAttribute('data-file-index'));
-                        const fileInfo = files[fileIndex];
-                        const filePath = fileInfo.path;
-
-                        // We only need to send the first ID of a pair to the backend.
-                        // The backend logic will find the partner automatically.
-                        const primaryHunkId = parseInt(hunkIdString.split(',')[0]);
-
-                        // Send message to apply the change
-                        vscode.postMessage({
-                            command: 'applySingleChange',
-                            filePath: filePath,
-                            hunkId: primaryHunkId,
-                        });
-
-                        // Disable this button and update UI to show change was applied
-                        button.disabled = true;
-                        button.textContent = 'Applied';
-                        const checkbox = document.querySelector(
-                            \`.hunk-checkbox[data-hunk-id="\${hunkIdString}"]\`
-                        );
-                        if (checkbox) {
-                            checkbox.disabled = true;
-                        }
-                    });
-                });
             });
         </script>`;
-    }
-
-    private escapeHtml(unsafe: string): string {
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;")
-            .replace(/`/g, "&#96;");
     }
 }

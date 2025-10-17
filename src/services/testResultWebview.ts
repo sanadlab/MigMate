@@ -257,7 +257,7 @@ function getMigrationDetails(outputDir: string): MigrationDetails | undefined {
 }
 
 // // Show test results in a WebView panel
-export function showTestResultsDetail(results: TestResults): void {
+export function showTestResultsView(results: TestResults): void {
     const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
 
     // // Show existing webview panel
@@ -306,12 +306,6 @@ function generateTestResultsHtml(results: TestResults): string {
     let migrationInfoHtml = '';
     if (results.migrationDetails) {
         const details = results.migrationDetails;
-        // const sourceText = details.versions?.source
-        //     ? `${details.sourceLib} (${details.versions.source})`
-        //     : details.sourceLib;
-        // const targetText = details.versions?.target
-        //     ? `${details.targetLib} (${details.versions.target})`
-        //     : details.targetLib;
         migrationInfoHtml = `
         <div class="migration-info">
             <div class="info-grid">
@@ -354,7 +348,7 @@ function generateTestResultsHtml(results: TestResults): string {
         }
         return `
         <div class="summary-card">
-            <h3>${title}${title === 'Post-Migration' ? `<span class="round-name">${formatRoundName(summary.roundName)}</span>` : ''}</h3>
+            <h3>${title}${title === 'Post-Migration' ? ` <span class="round-name">(${formatRoundName(summary.roundName)})</span>` : ''}</h3>
             <div class="stats">
                 <span class="passed">Passed: ${summary.passed}</span>
                 <span class="failed">Failed: ${summary.failed}</span>
@@ -399,19 +393,22 @@ function generateTestResultsHtml(results: TestResults): string {
                 color: var(--vscode-editor-foreground);
                 background: var(--vscode-editor-background);
                 font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif);
-                padding: 20px;
+                padding: 15px 20px;
             }
             h2, h3 {
                 color: var(--vscode-editor-foreground);
                 border-bottom: 1px solid var(--vscode-panel-border, #444);
-                padding-bottom: 10px;
+                padding-bottom: 8px;
+                margin-top: 15px;
+                margin-bottom: 10px;
             }
             h3 {
                 border-bottom: none;
                 padding-bottom: 5px;
+                margin-top: 10px;
             }
             .overall-summary {
-                margin-bottom: 20px;
+                margin-bottom: 15px;
                 font-size: 1.4em;
             }
             .summary-container {
@@ -419,7 +416,7 @@ function generateTestResultsHtml(results: TestResults): string {
                 align-items: center;
                 justify-content: center;
                 gap: 20px;
-                margin-bottom: 20px;
+                margin-bottom: 15px;
                 flex-wrap: wrap;
             }
             .summary-card {
@@ -435,14 +432,14 @@ function generateTestResultsHtml(results: TestResults): string {
             .summary-card h3 {
                 margin-top: 0;
                 text-align: center;
-                margin-bottom: 20px;
-                min-height: 40px;
+                margin-bottom: 15px;
+                min-height: 30px;
                 display: flex;
                 flex-direction: column;
                 justify-content: center;
             }
             .round-name {
-                font-size: 0.9em;
+                font-size: 0.8em;
                 font-weight: normal;
                 color: var(--vscode-descriptionForeground);
                 display: block;
@@ -471,7 +468,7 @@ function generateTestResultsHtml(results: TestResults): string {
                 font-weight: bold;
             }
             .failures {
-                margin-top: 20px;
+                margin-top: 10px;
                 margin-bottom: 15px;
             }
             .failure {
@@ -543,9 +540,8 @@ function generateTestResultsHtml(results: TestResults): string {
             .jump-button:hover {
                 background: var(--vscode-button-hoverBackground);
             }
-
             .log {
-                margin-top: 20px;
+                margin-top: 10px;
                 padding: 15px;
                 background: var(--vscode-editorWidget-background, #181818);
                 border-radius: 5px;
@@ -555,7 +551,6 @@ function generateTestResultsHtml(results: TestResults): string {
                 color: var(--vscode-editor-foreground, #eee);
                 border: 1px solid var(--vscode-panel-border, #444);
             }
-
             .migration-info {
                 background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background, #222));
                 border: 1px solid var(--vscode-panel-border, #444);
@@ -570,13 +565,16 @@ function generateTestResultsHtml(results: TestResults): string {
                 color: var(--vscode-editor-foreground);
             }
             .info-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-                grid-gap: 10px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px 20px;
+                justify-content: space-between;
             }
             .info-item {
                 display: flex;
                 flex-direction: column;
+                flex-grow: 1;
+                flex-basis: 180px;
             }
             .info-label {
                 font-size: 0.9em;
@@ -591,11 +589,13 @@ function generateTestResultsHtml(results: TestResults): string {
     <body>
         ${migrationInfoHtml}
         <h2 class="overall-summary">Migration Test Results:
-            ${results.failureCount > 0
-                ? `<span class="failed">❌ ${results.failureCount} test${results.failureCount !== 1 ? 's' : ''} failed in the final round</span>`
-                : results.postMigrationSummary
-                    ? '<span class="passed">✅ All tests passed</span>'
-                    : '<span class="skipped">No test results found</span>'
+            ${results.failureCount > 0 && results.postMigrationSummary
+                ? `<span class="failed">❌ ${results.failureCount} test${results.failureCount !== 1 ? 's' : ''} failed in round: ${formatRoundName(results.postMigrationSummary.roundName)}</span>`
+                : results.failureCount > 0
+                    ? `<span class="failed">❌ ${results.failureCount} test${results.failureCount !== 1 ? 's' : ''} failed</span>`
+                    : results.postMigrationSummary
+                        ? '<span class="passed">✅ All tests passed</span>'
+                        : '<span class="skipped">No test results found</span>'
             }
         </h2>
 
