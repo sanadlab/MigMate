@@ -270,6 +270,7 @@ export class MigrationWebview {
                 background: var(--vscode-editorWidget-background);
                 border: 1px solid var(--vscode-panel-border);
                 border-radius: 5px;
+                overflow: hidden;
             }
             .file-header {
                 padding: 8px;
@@ -278,19 +279,22 @@ export class MigrationWebview {
                 display: flex;
                 align-items: center;
                 cursor: pointer;
+                gap: 10px;
             }
             .file-path {
                 margin-left: 8px;
                 font-weight: bold;
+                flex-shrink: 0;
             }
             .file-summary {
-                margin-left: 10px;
+                margin-left: 0;
                 font-style: italic;
                 color: var(--vscode-descriptionForeground);
                 display: none;
+                white-space: nowrap;
             }
             .dropdown-arrow {
-                margin-left: 10px;
+                margin-left: 0;
                 width: 0;
                 height: 0;
                 border-top: 5px solid transparent;
@@ -308,6 +312,7 @@ export class MigrationWebview {
                 margin-left: auto;
                 display: flex;
                 gap: 5px;
+                flex-shrink: 0;
             }
             .apply-file-button, .apply-all-button {
                 background: var(--vscode-button-background);
@@ -325,76 +330,89 @@ export class MigrationWebview {
                 border-radius: 3px;
                 cursor: pointer;
             }
-            .hunk-container {
-                padding: 8px;
-                border-bottom: 1px solid var(--vscode-panel-border);
+            .file-content {
+                font-family: var(--vscode-editor-font-family);
+                font-size: var(--vscode-editor-font-size);
+                padding: 10px;
+                background-color: var(--vscode-editor-background);
+                border-radius: 4px;
+                margin: 8px;
+                border: 1px solid var(--vscode-panel-border);
             }
-            .hunk-container:last-child {
-                border-bottom: none;
+            .line-container {
+                display: flex;
+                min-height: 1.2em;
+                white-space: pre;
             }
-            .hunk-header {
+            .line-numbers-gutter {
+                flex: 0 0 55px;
+                user-select: none;
+                color: var(--vscode-editorLineNumber-foreground);
+                text-align: right;
+                padding-right: 10px;
+            }
+            .line-num-old, .line-num-new {
+                display: inline-block;
+                width: 30px;
+                opacity: 0.7;
+            }
+            .line-content-main {
+                flex-grow: 1;
+                padding-left: 10px;
+                position: relative;
+                overflow-x: auto;
+            }
+            .line-action-gutter {
+                flex: 0 0 90px;
                 display: flex;
                 align-items: center;
-                margin-bottom: 8px;
+                justify-content: center;
             }
-            .hunk-type {
+            .line-removed {
+                background-color: var(--vscode-diffEditor-removedTextBackground);
+            }
+            .line-added {
+                background-color: var(--vscode-diffEditor-insertedTextBackground);
+            }
+            .line-removed::before, .line-added::before {
+                position: absolute;
+                left: 0;
+            }
+            .line-removed::before {
+                content: "-";
+            }
+            .line-added::before {
+                content: "+";
+            }
+            .change-region {
+                // margin: 8px 0;
+                // border: 1px solid var(--vscode-panel-border);
+                border-radius: 4px;
+                display: flex;
+            }
+            .change-region-lines {
+                flex-grow: 1;
+                overflow: hidden;
+            }
+            .apply-change-button {
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: none;
+                padding: 2px 0;
+                border-radius: 3px;
+                cursor: pointer;
                 font-size: 0.9em;
-                padding: 2px 6px;
-                border-radius: 3px;
-                margin-left: 10px;
-            }
-            .hunk-type-added {
-                background: var(--vscode-diffEditor-insertedTextBackground);
-                color: var(--vscode-editor-foreground);
-            }
-            .hunk-type-removed {
-                background: var(--vscode-diffEditor-removedTextBackground);
-                color: var(--vscode-editor-foreground);
-            }
-            .hunk-type-replaced {
-                background: var(--vscode-badge-background);
-                color: var(--vscode-editor-foreground);
-            }
-            .hunk-content {
-                font-family: var(--vscode-editor-font-family);
-                padding: 8px;
-                white-space: pre-wrap;
-                overflow-x: auto;
-                font-size: var(--vscode-editor-font-size);
-            }
-            .hunk-content-removed {
-                background: var(--vscode-diffEditor-removedTextBackground);
-                border-radius: 3px;
-            }
-            .hunk-content-added {
-                background: var(--vscode-diffEditor-insertedTextBackground);
-                border-radius: 3px;
+                width: 70px;
+                min-width: 70px;
+                text-align: center;
             }
             .buttons {
                 display: flex;
                 justify-content: flex-end;
-                margin-top: 20px;
+                // margin-top: 20px;
                 padding-top: 10px;
-                border-top: 1px solid var(--vscode-panel-border);
+                // border-top: 1px solid var(--vscode-panel-border);
                 gap: 10px;
-            }
-            .apply-single-button {
-                margin-left: auto;
-                background: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-                border: none;
-                padding: 4px 8px;
-                border-radius: 3px;
-                cursor: pointer;
-                font-size: 0.8em;
-            }
-            .apply-button {
-                background: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-                border: none;
-                padding: 8px 16px;
-                border-radius: 3px;
-                cursor: pointer;
             }
             .cancel-button {
                 background: var(--vscode-button-secondaryBackground);
@@ -425,11 +443,6 @@ export class MigrationWebview {
                 </div>
             </div>
         </div>`;
-    }
-
-    private async generateFilesList(changes: MigrationChange[]): Promise<string> {
-        const fileItems = await Promise.all(changes.map((change, fileIndex) => this.generateFileItem(change, fileIndex)));
-        return `<div class="files-list">${fileItems.join('')}</div>`;
     }
 
     private async generateFileItem(change: MigrationChange, fileIndex: number): Promise<string> {
@@ -476,45 +489,61 @@ export class MigrationWebview {
             }
 
             let contentHtml = '<div class="file-content">';
-            let i = 0;
-            while (i < fileLines.length) {
-                if (lineDetails[i]) {
-                    const detail = lineDetails[i];
+            let oldLineNum = 1;
+            let newLineNum = 1;
+
+            while (oldLineNum <= fileLines.length) {
+                const lineIndex = oldLineNum - 1;
+                if (lineDetails[lineIndex]) {
+                    const detail = lineDetails[lineIndex];
                     const hunkIds = detail.hunkIds.join(',');
 
-                    contentHtml += `<div class="change-region">`;
-                    contentHtml += `<div class="change-region-actions">
-                        <button class="apply-change-button" data-file-index="${fileIndex}" data-hunk-ids="${hunkIds}">
-                            Apply This Change
-                        </button>
-                    </div>`;
+                    let changeBlockHtml = '';
 
                     if (detail.type === 'removed' || detail.type === 'replaced') {
-                        // // Group all consecutive removed lines
-                        let endLine = i;
+                        let endLine = lineIndex;
                         while(lineDetails[endLine + 1] && lineDetails[endLine + 1].type === 'removed') {
                             endLine++;
                         }
-                        for (let j = i; j <= endLine; j++) {
-                            contentHtml += `<div class="line line-removed">${escapeHtml(fileLines[j] || '')}</div>`;
+                        for (let j = lineIndex; j <= endLine; j++) {
+                            changeBlockHtml += `<div class="line-container">
+                                <div class="line-numbers-gutter"><span class="line-num-old">${oldLineNum + (j - lineIndex)}</span><span class="line-num-new"></span></div>
+                                <div class="line-content-main line-removed">${escapeHtml(fileLines[j] || ' ')}</div>
+                            </div>`;
                         }
-                        i = endLine;
+                        oldLineNum += (endLine - lineIndex + 1);
                     }
 
                     if (detail.type === 'added' || detail.type === 'replaced') {
                         const lines = detail.content?.split('\n') || [];
                         for (const line of lines) {
-                            contentHtml += `<div class="line line-added">${escapeHtml(line)}</div>`;
+                            changeBlockHtml += `<div class="line-container">
+                                <div class="line-numbers-gutter"><span class="line-num-old"></span><span class="line-num-new">${newLineNum++}</span></div>
+                                <div class="line-content-main line-added">${escapeHtml(line || ' ')}</div>
+                            </div>`;
                         }
                     }
-                    contentHtml += `</div>`;
+
+                    contentHtml += `<div class="change-region">
+                        <div class="change-region-lines">${changeBlockHtml}</div>
+                        <div class="line-action-gutter">
+                            <button class="apply-change-button" data-file-index="${fileIndex}" data-hunk-ids="${hunkIds}">Apply</button>
+                        </div>
+                    </div>`;
+
                 } else {
-                    contentHtml += `<div class="line">${escapeHtml(fileLines[i] || '')}</div>`;
+                    if (lineIndex < fileLines.length) {
+                        contentHtml += `<div class="line-container">
+                            <div class="line-numbers-gutter"><span class="line-num-old">${oldLineNum}</span><span class="line-num-new">${newLineNum}</span></div>
+                            <div class="line-content-main">${escapeHtml(fileLines[lineIndex] || ' ')}</div>
+                            <div class="line-action-gutter"></div>
+                        </div>`;
+                    }
+                    oldLineNum++;
+                    newLineNum++;
                 }
-                i++;
             }
             contentHtml += '</div>';
-
             const totalChanges = Object.keys(lineDetails).length;
 
             return `<details class="file-item" data-file-path="${filePath}" data-file-index="${fileIndex}" open>
@@ -525,8 +554,8 @@ export class MigrationWebview {
                     <div class="file-header-buttons">
                         <button class="jump-to-file-button" data-file-path="${filePath}">View File</button>
                         <button class="view-diff-button" data-file-path="${filePath}">View Diff</button>
+                        <button class="apply-file-button" data-file-path="${filePath}">Apply All</button>
                     </div>
-                    <button class="apply-file-button" data-file-path="${filePath}">Apply File Changes</button>
                 </summary>
                 ${contentHtml}
             </details>`;
@@ -586,6 +615,7 @@ export class MigrationWebview {
                         if (fileItem) {
                             fileItem.style.opacity = '0.6';
                             fileItem.querySelectorAll('button').forEach(btn => btn.disabled = true);
+                            fileItem.querySelectorAll('.apply-change-button').forEach(applyBtn => {applyBtn.textContent = 'Applied';});
                         }
                     });
                 });
