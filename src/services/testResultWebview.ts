@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { logger } from './logging';
+import { escapeHtml, formatRoundName } from '../webviewUtils';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 
@@ -650,27 +651,6 @@ function generateTestResultsHtml(results: TestResults): string {
         </script>
     </body>
     </html>`;
-}
-
-// // Format round name for display
-function formatRoundName(round: string): string {
-    switch(round) {
-        case '0-premig': return 'Pre-Migration';
-        case '1-llmmig': return 'LLM Migration';
-        case '2-merge-skipped': return 'Merge Skipped';
-        case '3-async_transform': return 'Async Transform';
-        default: return round;
-    }
-}
-
-// // Escape HTML for safety
-function escapeHtml(unsafe: string): string {
-    return unsafe
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
 }
 
 // // WIP to check CLI output for failures (use as backup? or maybe for non-test failure issues?)
