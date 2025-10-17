@@ -6,6 +6,7 @@ import { telemetryService } from '../services/telemetry';
 import { logger } from '../services/logging';
 import { MigrationWebview } from './migrationWebview';
 import { DiffUtils } from './diffUtils';
+import { CONFIG } from '../constants';
 
 
 
@@ -36,7 +37,7 @@ export class PreviewManager {
         migrationState.loadChanges(changes);
 
         // // Show preview based on mode selected in config
-        const previewMode = configService.get<string>('options.previewStyle', 'Refactor Preview');
+        const previewMode = configService.get<string>(CONFIG.PREVIEW_STYLE, 'Webview');
         const strategy = this.strategies.get(previewMode);
         logger.info(`Using preview mode: ${previewMode}`);
 

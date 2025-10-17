@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { COMMANDS, PLUGIN_TITLE } from '../constants';
 
 
 
@@ -18,7 +19,7 @@ export class HoverProvider implements vscode.HoverProvider {
             // console.log(`Hover detected on library: ${libName}`);
 
             const markdown = new vscode.MarkdownString(
-                `**LibMig Plugin:**\n\n[Migrate \`${libName}\`](command:libmig.migrate?${JSON.stringify(libName)})`
+                `**${PLUGIN_TITLE} Plugin:**\n\n[Migrate \`${libName}\`](command:${COMMANDS.MIGRATE}?${JSON.stringify(libName)})`
             );
             markdown.isTrusted = true;
             return new vscode.Hover(markdown, wordRange);

@@ -4,13 +4,14 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync, exec } from 'child_process';
 import { logger } from '../services/logging';
+import { PLUGIN } from '../constants';
 
 
 
 export class EnvironmentManager {
     // // Temp directory creation/deletion
     public async createTempDirectory(): Promise<string> {
-        const tempDir = path.join(os.tmpdir(), `libmig-preview-${Date.now()}`);
+        const tempDir = path.join(os.tmpdir(), `${PLUGIN}-preview-${Date.now()}`);
         logger.info(`Creating temporary directory: ${tempDir}`);
         fs.mkdirSync(tempDir, { recursive: true });
         return tempDir;

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { configService } from './config';
 import { telemetryService } from './telemetry';
 import { contextService } from './context';
+import { COMMANDS, CONFIG } from '../constants';
 
 
 
@@ -41,7 +42,7 @@ export async function getSourceLibrary(hoverLibrary: string | undefined, librari
 
 // // Handle target library selection
 export async function getTargetLibrary(srcLib: string): Promise<string | undefined> {
-    const suggestionsEnabled = configService.get<boolean>('options.enableSuggestions.(Experimental)');
+    const suggestionsEnabled = configService.get<boolean>(CONFIG.LIBRARY_SUGGESTIONS);
     if (!suggestionsEnabled) {
         console.warn('Target library suggestions are disabled');
         return await vscode.window.showInputBox({ prompt: 'Enter the target library name' });
@@ -63,7 +64,7 @@ export async function getTargetLibrary(srcLib: string): Promise<string | undefin
 
 // // Parse requirements.txt to get library names
 export async function getLibrariesFromRequirements(): Promise<string[]> {
-    const reqFileName = configService.get<string>('options.requirementFileName') || 'requirements.txt';
+    const reqFileName = configService.get<string>(CONFIG.REQ_FILE) || 'requirements.txt';
 
     // // Check the active editor
     const editor = vscode.window.activeTextEditor;
@@ -101,10 +102,10 @@ export async function getLibrariesFromRequirements(): Promise<string[]> {
 
 // // WIP alternative to existing target library recommendations
 export async function getSuggestedLibraries(srcLib: string): Promise<string[]> {
-    const suggestionsEnabled = configService.get<boolean>('options.enableSuggestions');
+    const suggestionsEnabled = configService.get<boolean>(CONFIG.LIBRARY_SUGGESTIONS);
     if (!suggestionsEnabled) {console.warn('Target library suggestions are disabled'); return [];}
 
-    const libraryKeyID = 'libmig.librariesioApiKey';
+    const libraryKeyID = CONFIG.LIBRARY_SUGGESTIONS;
     let apiKey = await contextService.secrets.get(libraryKeyID);
     if (!apiKey) {
         const selection = await vscode.window.showWarningMessage(
@@ -113,7 +114,7 @@ export async function getSuggestedLibraries(srcLib: string): Promise<string[]> {
         );
 
         if (selection === 'Set API Key') {
-            await vscode.commands.executeCommand('libmig.setApiKey');
+            await vscode.commands.executeCommand(COMMANDS.SET_API_KEY);
             apiKey = await contextService.secrets.get(libraryKeyID);
             if (!apiKey) {
                 console.warn("No Libraries.io API key provided");

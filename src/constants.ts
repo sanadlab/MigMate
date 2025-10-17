@@ -1,4 +1,6 @@
+// // Plugin
 export const PLUGIN = 'libmig';
+export const PLUGIN_TITLE = 'LibMig';
 
 // // Command IDs
 export const COMMANDS = {
@@ -11,9 +13,11 @@ export const COMMANDS = {
 // // Config Keys
 export const CONFIG = {
     // // Bools
-    MIG_FAILURE_PREVIEW: 'options.previewOnMigrationFailure',
+    USE_CACHE: 'flags.useCache',
     FORCE_RERUN: 'flags.forceRerun',
     SKIP_TESTS: 'flags.smartSkipTests',
+    MIG_FAILURE_PREVIEW: 'options.previewOnMigrationFailure',
+    TEMP_DIR: 'options.useTempDirectory',
     LIBRARY_SUGGESTIONS: 'options.enableSuggestions.(Experimental)',
     // // Integers
     MAX_FILES: 'flags.maxFileCount',
@@ -24,8 +28,7 @@ export const CONFIG = {
     // // Strings
     PYTHON_VERSION: 'flags.pythonVersion',
     REPO_NAME: 'flags.repositoryName',
-    PYTEST_FLAGS: 'options.pytestFlags',
-    TEST_ROOT: 'flags.testSuitePath',
+    TEST_ROOT: 'flags.testRoot',
     OUTPUT_PATH: 'flags.outputPath',
     REQ_FILE: 'flags.requirementFilePath',
 };
@@ -39,7 +42,13 @@ export const TELEMETRY = {
     // // Migration Interactions
     MIG_CANCEL: 'migrationCancelled',
     MIG_APPLY: 'migrationApplied',
-    MIG_REJECT: 'migrationRejected'
+    MIG_REJECT: 'migrationRejected',
     // // Usability?
     // e.g. preview style
+};
+
+// // API Key IDs
+export const API_KEY_ID = {
+    LIBRARIES: 'libmig.librariesioApiKey',
+    OPENAI: 'libmig.openaiApiKey',
 };

@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { logger } from './logging';
 import { escapeHtml, formatRoundName } from '../webviewUtils';
+import { configService } from './config';
+import { CONFIG, PLUGIN } from '../constants';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 
@@ -45,11 +47,12 @@ export interface TestResults {
 // // Check test results in the output directory
 export async function checkTestResults(baseDir: string): Promise<TestResults> {
     // // Check for output directory
+    const outDirName = configService.get(CONFIG.OUTPUT_PATH, '.libmig');
     let outputDir: string;
-    if (path.basename(baseDir) === '.libmig') {
+    if (path.basename(baseDir) === outDirName) {
         outputDir = baseDir;
     } else {
-        outputDir = path.join(baseDir, '.libmig');
+        outputDir = path.join(baseDir, outDirName);
     }
 
     const results: TestResults = {
@@ -269,7 +272,7 @@ export function showTestResultsView(results: TestResults): void {
 
     // // Create and show new webview
     currentPanel = vscode.window.createWebviewPanel(
-        'libmigTestResults',
+        'migTestResults',
         'Migration Test Results',
         column || vscode.ViewColumn.One,
         { enableScripts: true }

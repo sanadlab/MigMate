@@ -11,6 +11,7 @@ import { MigrationExecutor } from './migrationExecutor';
 import { PreviewManager } from './previewManager';
 import { configService } from '../services/config';
 import { MigrationChange } from './migrationState';
+import { CONFIG } from '../constants';
 
 
 
@@ -24,7 +25,7 @@ export class MigrationService {
     constructor(private context: vscode.ExtensionContext) {
         this.environmentManager = new EnvironmentManager();
         this.fileProcessor = new FileProcessor();
-        this.migrationExecutor = new MigrationExecutor();
+        this.migrationExecutor = new MigrationExecutor(context);
         this.previewManager = new PreviewManager();
     }
 
@@ -51,7 +52,7 @@ export class MigrationService {
                 progress.report({ message: "Selecting libraries...", increment: 5 });
                 const { srcLib, tgtLib } = await this.selectLibraries(hoverLibrary);
 
-                const useTempDirectory = configService.get<boolean>('options.useTempDirectory');
+                const useTempDirectory = configService.get<boolean>(CONFIG.TEMP_DIR, false);
                 logger.info(`Migration mode: ${useTempDirectory ? 'Temp' : 'Direct'}`);
                 if (useTempDirectory) {
                     await this.runTempMigration(workspacePath, srcLib, tgtLib, progress);
@@ -142,7 +143,7 @@ export class MigrationService {
             }
 
             // // Check output folder for saved files (start from later rounds) // check this
-            const outputDir = path.join(workspacePath, '.libmig'); // check this
+            const outputDir = path.join(workspacePath, configService.get(CONFIG.OUTPUT_PATH, '.libmig')); // check this
             const roundFolders = ['0-premig', '1-llmmig', '2-merge_skipped', '3-async_transform']; // consider making a constant, maybe use for config enum as well
             let migratedFilesDir: string | undefined;
 

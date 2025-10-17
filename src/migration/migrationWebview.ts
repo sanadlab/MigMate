@@ -4,6 +4,7 @@ import { MigrationChange, DiffHunk, migrationState } from './migrationState';
 import { logger } from '../services/logging';
 import { DiffUtils } from './diffUtils';
 import { escapeHtml } from '../webviewUtils';
+import { PLUGIN } from '../constants';
 
 export class MigrationWebview {
     private panel: vscode.WebviewPanel | undefined;
@@ -12,7 +13,7 @@ export class MigrationWebview {
         // // Create Webview panel if it doesn't exist or reuse existing
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel(
-                'migrationPreview',
+                'migPreview',
                 `Migration Preview: ${srcLib} → ${tgtLib}`,
                 vscode.ViewColumn.One,
                 {
@@ -56,7 +57,7 @@ export class MigrationWebview {
                         const originalUri = vscode.Uri.file(message.filePath);
                         const change = migrationState.getChange(originalUri);
                         if (change) {
-                            const updatedUri = vscode.Uri.parse(`libmig-preview:${originalUri.fsPath}`);
+                            const updatedUri = vscode.Uri.parse(`${PLUGIN}-preview:${originalUri.fsPath}`);
                             const title = `${path.basename(originalUri.fsPath)} (Original ↔ Migrated)`;  // check this
                             await vscode.commands.executeCommand('vscode.diff', originalUri, updatedUri, title);
                         }

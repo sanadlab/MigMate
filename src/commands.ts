@@ -5,7 +5,7 @@ import { telemetryService } from './services/telemetry';
 import { logger } from './services/logging';
 import { checkTestResults, showTestResultsView } from './services/testResultWebview';
 import * as fs from 'fs';
-import { COMMANDS } from './constants';
+import { COMMANDS, API_KEY_ID } from './constants';
 import { MigrationService } from './migration/migrationService';
 import { MigrationWebview } from './migration/migrationWebview';
 
@@ -46,7 +46,7 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 	// // Check CLI tool using '--help' flag, check config
-	const healthCheck = vscode.commands.registerCommand('libmig.healthCheck', () => {
+	const healthCheck = vscode.commands.registerCommand(COMMANDS.HEALTH_CHECK, () => {
 		exec('libmig --help', (err, stdout, stderr) => {
 			if (err) {
 				vscode.window.showErrorMessage(`Error: ${err.message}`);
@@ -62,13 +62,10 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 	// // Set API keys for libraries.io and OpenAI(?)
-	const setAPI = vscode.commands.registerCommand('libmig.setApiKey', async () => {
-		const libraryKeyID = 'libmig.librariesioApiKey';
-		const llmKeyID = 'libmig.openaiApiKey';
-
+	const setAPI = vscode.commands.registerCommand(COMMANDS.SET_API_KEY, async () => {
 		const services = [
-			{ label: 'Libraries.io', id: libraryKeyID, description: 'For library suggestions' },
-			{ label: 'OpenAI', id: llmKeyID, description: 'For automated migrations' }
+			{ label: 'Libraries.io', id: API_KEY_ID.LIBRARIES, description: 'For library suggestions' },
+			{ label: 'OpenAI', id: API_KEY_ID.OPENAI, description: 'For automated migrations' }
 		];
 
 		const selectedService = await vscode.window.showQuickPick(services, {

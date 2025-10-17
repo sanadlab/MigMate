@@ -33,7 +33,7 @@ export function registerProviders(context: vscode.ExtensionContext) {
     }
     // // Re-register hover provider if requirement file path is updated
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-        if (event.affectsConfiguration('libmig.flags.requirementFilePath')) {
+        if (event.affectsConfiguration(`${PLUGIN}.${CONFIG.REQ_FILE}`)) {
             updateHoverProviderRegistration();
         }
     }));
@@ -42,10 +42,10 @@ export function registerProviders(context: vscode.ExtensionContext) {
     // // For diff view (in Webview)
     const updatedContentProvider = new UpdatedContentProvider();
     const contentProviderRegistration = vscode.workspace.registerTextDocumentContentProvider(
-        'libmig-preview',
+        `${PLUGIN}-preview`,
         updatedContentProvider
     );
     context.subscriptions.push(contentProviderRegistration);
 }
 
-// vscode.window.registerTreeDataProvider('libmig-tree')
+// vscode.window.registerTreeDataProvider(`${PLUGIN}-tree`)
