@@ -11,7 +11,7 @@ import { MigrationExecutor } from './migrationExecutor';
 import { PreviewManager } from './previewManager';
 import { configService } from '../services/config';
 import { MigrationChange } from './migrationState';
-import { CONFIG } from '../constants';
+import { CONFIG, ROUND_FOLDERS } from '../constants';
 
 
 
@@ -51,14 +51,7 @@ export class MigrationService {
 
                 progress.report({ message: "Selecting libraries...", increment: 5 });
                 const { srcLib, tgtLib } = await this.selectLibraries(hoverLibrary);
-
-                const useTempDirectory = configService.get<boolean>(CONFIG.TEMP_DIR, false);
-                logger.info(`Migration mode: ${useTempDirectory ? 'Temp' : 'Direct'}`);
-                if (useTempDirectory) {
-                    await this.runTempMigration(workspacePath, srcLib, tgtLib, progress);
-                } else {
-                    await this.runDirectMigration(workspacePath, srcLib, tgtLib, progress);
-                }
+                await this.runDirectMigration(workspacePath, srcLib, tgtLib, progress);
                 progress.report({ message: "Done.", increment: 10 });
             } catch (error) {
                 const err = error as Error;
@@ -70,47 +63,6 @@ export class MigrationService {
                 this.activeMigration = false;
             }
         });
-    }
-
-    private async runTempMigration(workspacePath: string, srcLib: string, tgtLib: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
-        const tempDir = await this.environmentManager.createTempDirectory();
-        try {
-            // // Copy the files over to temp directory
-            progress.report({ message: "Copying files...", increment: 20 });
-            const { pythonFiles, requirementsFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
-            this.fileProcessor.copyToTempDir(
-                [...pythonFiles, ...requirementsFiles],
-                workspacePath,
-                tempDir
-            );
-            this.environmentManager.initGitRepository(tempDir); // check this
-            // // Perform the migration and check for test failures
-            progress.report({ message: `Migrating from ${srcLib} to ${tgtLib}...`, increment: 30 });
-            await this.migrationExecutor.executeMigration(srcLib, tgtLib, tempDir);
-            progress.report({ message: "Checking test results...", increment: 10 });
-            const testResults = await checkTestResults(tempDir);
-            if (testResults.hasFailures) {
-                const viewDetailsAction = 'View Details';
-                const response = await vscode.window.showWarningMessage(
-                    `${testResults.failureCount} test${testResults.failureCount !== 1 ? 's' : ''} failed during migration.`,
-                    viewDetailsAction
-                );
-                if (response === viewDetailsAction) {
-                    showTestResultsView(testResults);
-                }
-            }
-            // // Compare files and show preview
-            progress.report({ message: "Analyzing changes...", increment: 10 });
-            const changes = this.fileProcessor.compareFiles(pythonFiles, workspacePath, tempDir);
-            this.environmentManager.saveResultsPath(this.context, tempDir);
-            progress.report({ message: "Generating preview...", increment: 10 });
-            await this.previewManager.showChanges(changes, srcLib, tgtLib);
-            logger.info('Migration process completed successfully (temp)');
-            telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, mode: 'temp', changesFound: changes.length.toString() });
-        } catch (error) {
-            logger.error('Error during migration process (temp)', error as Error);
-            throw error; // temp dir won't be cleaned if migration fails --> check test logs
-        }
     }
 
     private async runDirectMigration(workspacePath: string, srcLib: string, tgtLib: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
@@ -143,8 +95,8 @@ export class MigrationService {
             }
 
             // // Check output folder for saved files (start from later rounds) // check this
-            const outputDir = path.join(workspacePath, configService.get(CONFIG.OUTPUT_PATH, '.libmig')); // check this
-            const roundFolders = ['0-premig', '1-llmmig', '2-merge_skipped', '3-async_transform']; // consider making a constant, maybe use for config enum as well
+            const outputDir = path.join(workspacePath, configService.get(CONFIG.OUTPUT_PATH, '.libmig'));
+            const roundFolders = ROUND_FOLDERS;
             let migratedFilesDir: string | undefined;
 
             for (let i = roundFolders.length - 1; i >= 0; i--) {
@@ -164,7 +116,7 @@ export class MigrationService {
                     return;
                 }
 
-            // // Restore original files // is this better than saving pre-mig content in memory?
+            // // Restore original files
             progress.report({ message: "Restoring workspace to original state...", increment: 20 });
             await this.environmentManager.gitResetHard(workspacePath);
 

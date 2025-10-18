@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { spawn } from 'child_process';
 import { configService } from './config';
 import { logger } from './logging';
-import { CONFIG, PLUGIN_TITLE } from '../constants';
+import { CONFIG, PLUGIN_TITLE, ROUNDS } from '../constants';
 
 
 
@@ -60,14 +60,7 @@ export function buildCliCommand(srcLib: string, tgtLib: string): string {
                 commandParts.push(cliFlag); // Apparently the boolean flags are toggles --> don't take values
             }
             else if (currentValue !== '') {
-                if (Array.isArray(currentValue) && currentValue.length > 0) { // currently only for migrationRounds
-                    currentValue.forEach(subValue => {
-                        commandParts.push(`${cliFlag}=${subValue}`);
-                    });
-                }
-                else if (!Array.isArray(currentValue)) { // check if this is fine for all string config options
-                    commandParts.push(`${cliFlag}=${currentValue}`);
-                }
+                commandParts.push(`${cliFlag}="${currentValue}"`);
             }
         }
     };
@@ -75,7 +68,7 @@ export function buildCliCommand(srcLib: string, tgtLib: string): string {
     const addFlagAlways = (key: string, cliFlag: string) => {
         const currentValue = configService.get(key);
         if (currentValue !== undefined && currentValue !== '') {
-            commandParts.push(`${cliFlag}=${currentValue}`);
+            commandParts.push(`${cliFlag}="${currentValue}"`);
         }
     };
 
@@ -90,7 +83,9 @@ export function buildCliCommand(srcLib: string, tgtLib: string): string {
     addFlag(CONFIG.FORCE_RERUN, '--force-rerun'); // bool, default=False
     addFlag(CONFIG.SKIP_TESTS, '--smart-skip-tests'); // bool, default=False
     addFlagAlways(CONFIG.LLM_CLIENT, '--llm'); // string, default=None --> uses GPT-4o mini by default
-    addFlag(CONFIG.MIG_ROUNDS, '--rounds'); // list[str], default=None
+
+    // // Always run all migration rounds (except manual_edit)
+    ROUNDS.forEach(round => commandParts.push(`--rounds=${round}`));
 
     return commandParts.join(' ');
 }

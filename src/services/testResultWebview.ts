@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { logger } from './logging';
 import { escapeHtml, formatRoundName } from '../webviewUtils';
 import { configService } from './config';
-import { CONFIG, PLUGIN } from '../constants';
+import { CONFIG, PLUGIN, ROUND_FOLDERS } from '../constants';
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
 
@@ -78,12 +78,7 @@ export async function checkTestResults(baseDir: string): Promise<TestResults> {
     }
 
     // // Possible round directories
-    const rounds = [
-        '0-premig',
-        '1-llmmig',
-        '2-merge_skipped',
-        '3-async_transform'
-    ];
+    const rounds = ROUND_FOLDERS;
 
     // // Find latest round w/ test report for post-migration summary // // check this for stale round folder issue
     let latestRound: string | undefined;
@@ -97,7 +92,7 @@ export async function checkTestResults(baseDir: string): Promise<TestResults> {
 
     // // Look for test reports in each round directory
     for (const round of rounds) {
-        if (round !== '0-premig' && round !== latestRound) {continue;}
+        if (round !== ROUND_FOLDERS[0] && round !== latestRound) {continue;}
 
         const roundDir = path.join(outputDir, round);
         if (!fs.existsSync(roundDir)) {continue;}
@@ -170,7 +165,7 @@ export async function checkTestResults(baseDir: string): Promise<TestResults> {
         }
 
         if (summary) {
-            if (round === '0-premig') {
+            if (round === ROUND_FOLDERS[0]) {
                 results.preMigrationSummary = summary;
             } else if (round === latestRound) {
                 results.postMigrationSummary = summary;

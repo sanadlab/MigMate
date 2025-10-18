@@ -1,6 +1,9 @@
 // // Plugin
 export const PLUGIN = 'libmig';
 export const PLUGIN_TITLE = 'LibMig';
+export const ROUNDS = ['premig', 'llmmig', 'merge_skipped', 'async_transform'];
+export const ROUND_TITLES = ['Pre-Migration', 'LLM Migration', 'Merge Skipped', 'Async Transform'];
+export const ROUND_FOLDERS = ROUNDS.map((round, index) => `${index}-${round}`);
 
 // // Command IDs
 export const COMMANDS = {
@@ -17,14 +20,12 @@ export const CONFIG = {
     FORCE_RERUN: 'flags.forceRerun',
     SKIP_TESTS: 'flags.smartSkipTests',
     MIG_FAILURE_PREVIEW: 'options.previewOnMigrationFailure',
-    TEMP_DIR: 'options.useTempDirectory',
-    LIBRARY_SUGGESTIONS: 'options.enableSuggestions.(Experimental)',
+    LIBRARY_SUGGESTIONS: 'options.enableSuggestions (Experimental)',
     // // Integers
     MAX_FILES: 'flags.maxFileCount',
     // // Enums
     LLM_CLIENT: 'flags.LLMClient',
     PREVIEW_STYLE: 'options.previewStyle',
-    MIG_ROUNDS: 'flags.migrationRounds',
     // // Strings
     PYTHON_VERSION: 'flags.pythonVersion',
     REPO_NAME: 'flags.repositoryName',

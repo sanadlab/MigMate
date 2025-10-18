@@ -7,10 +7,10 @@ import { DiffUtils } from './diffUtils';
 
 
 
-export class FileProcessor { // update the file block patterns
+export class FileProcessor { // update the file blob patterns
     public async findPythonFiles(workspacePath: string): Promise<{ pythonFiles: vscode.Uri[], requirementsFiles: vscode.Uri[] }> {
         logger.info('Finding Python files in workspace...');
-        const excludePattern = '{**/.libmig/**,**/node_modules/**,**/.venv/**,**/venv/**,**/.git/**,**/site-packages/**,**/__pycache__/**,**/\\.pytest_cache/**,**/\\.tox/**,**/\\.mypy_cache/**}'
+        const excludePattern = '{**/.libmig/**,**/node_modules/**,**/.venv/**,**/venv/**,**/.git/**,**/site-packages/**,**/__pycache__/**,**/\\.pytest_cache/**,**/\\.tox/**,**/\\.mypy_cache/**}';
         let pythonFiles = await vscode.workspace.findFiles(
             new vscode.RelativePattern(workspacePath, '**/*.py'),
             excludePattern
@@ -21,18 +21,6 @@ export class FileProcessor { // update the file block patterns
 
         logger.info(`Found ${pythonFiles.length} Python files and ${requirementsFiles.length} requirements files`);
         return { pythonFiles, requirementsFiles };
-    }
-
-    public copyToTempDir(files: vscode.Uri[], workspacePath: string, tempDir: string): void {
-        logger.info(`Copying ${files.length} files to temporary directory...`);
-        for (const fileUri of files) {
-            const relativePath = path.relative(workspacePath, fileUri.fsPath);
-            const tempFilePath = path.join(tempDir, relativePath);
-            fs.mkdirSync(path.dirname(tempFilePath), { recursive: true });
-            const content = fs.readFileSync(fileUri.fsPath, 'utf8');
-            fs.writeFileSync(tempFilePath, content);
-        }
-        logger.info('Files copied successfully');
     }
 
     public compareFiles(comparisonFiles: vscode.Uri[], workspacePath: string, comparePath: string): Omit<MigrationChange, 'hunks'>[] {

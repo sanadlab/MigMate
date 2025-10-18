@@ -9,27 +9,8 @@ import { PLUGIN } from '../constants';
 
 
 export class EnvironmentManager {
-    // // Temp directory creation/deletion
-    public async createTempDirectory(): Promise<string> {
-        const tempDir = path.join(os.tmpdir(), `${PLUGIN}-preview-${Date.now()}`);
-        logger.info(`Creating temporary directory: ${tempDir}`);
-        fs.mkdirSync(tempDir, { recursive: true });
-        return tempDir;
-    }
-
-    public cleanupTempDirectory(tempDir: string): void {
-        try {
-            logger.info(`Cleaning up temporary directory: ${tempDir}`);
-            fs.rmSync(tempDir, { recursive: true, force: true });
-            logger.info('Temporary directory cleaned up successfully');
-        } catch (error) {
-            const err = error as Error; // temp dir won't be cleaned if error occurs
-            logger.warn(`Failed to clean up temporary directory: ${err.message}`);
-        }
-    }
-
     // // Various git commands
-    public initGitRepository(tempDir: string): void { // only use for temp
+    public initGitRepository(tempDir: string): void { // only use for temp --> maybe repurpose as option during direct?
         try {
             logger.info('Initializing git repository in temporary directory');
             execSync('git init', { cwd: tempDir });
@@ -37,7 +18,7 @@ export class EnvironmentManager {
             execSync('git commit -m "Initial state for migration"', { cwd: tempDir });
             logger.info('Git repository initialized successfully');
         } catch (error) {
-            const err = error as Error; // temp dir won't be cleaned if error occurs
+            const err = error as Error;
             logger.error('Failed to initialize git repository:', err);
             throw new Error('Failed to initialize git for migration. Please ensure git is installed and in your PATH.');
         }
