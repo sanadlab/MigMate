@@ -12,7 +12,7 @@
 
 ## Project Information
 
-This is a CS Capstone project for student Matthias Kebede, being advised by Sarah Nadi and May Mahmoud. The objective of the project is to create a plugin that integrates the existing LibMig tool into Visual Studio Code. LibMig is a CLI tool that allows the user to automate the migration of Python libraries by using LLMs.
+This is a CS Capstone project for student Matthias Kebede, being advised by Sarah Nadi and May Mahmoud. The objective of the project is to create a plugin that integrates the existing MigMate tool into Visual Studio Code. MigMate is a CLI tool that allows the user to automate the migration of Python libraries by using LLMs.
 
 ## Project Setup
 
@@ -53,11 +53,11 @@ With VS Code open and the extension running, you can now use the plugin's comman
 The current version is an early prototype, and uses stubs/mocks accordingly. A sample Python project is provided for basic usage.
 
 Commands:
-- LibMig: Hello World
-- LibMig: Migrate a Library
-- LibMig: Show Migration Preview
-- LibMig: Backup a file before migrating
-- LibMig: Restore a migrated file
+- MigMate: Hello World
+- MigMate: Migrate a Library
+- MigMate: Show Migration Preview
+- MigMate: Backup a file before migrating
+- MigMate: Restore a migrated file
 
 Misc:
 - Hover over a library in `requirements.txt` to initiate a migration using it as the chosen source library.

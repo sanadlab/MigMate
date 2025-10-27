@@ -7,15 +7,15 @@ class ConfigService {
     private config: vscode.WorkspaceConfiguration;
 
     constructor() {
-        this.config = vscode.workspace.getConfiguration('libmig');
+        this.config = vscode.workspace.getConfiguration('migmate');
     }
 
     public initialize(context: vscode.ExtensionContext) {
         context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-            if (event.affectsConfiguration('libmig')) {
-                console.log("Update LibMig configuration");
+            if (event.affectsConfiguration('migmate')) {
+                console.log("Update MigMate configuration");
 			    telemetryService.sendTelemetryEvent('configChanged'); // check this
-                this.config = vscode.workspace.getConfiguration('libmig');
+                this.config = vscode.workspace.getConfiguration('migmate');
             }
         }));
     }

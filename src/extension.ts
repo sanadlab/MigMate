@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
 	registerCommands(context);
 
 	// // Startup logging
-	console.log('Congratulations, your extension "LibMig" is now active!');
+	console.log('Congratulations, your extension "MigMate" is now active!');
 	const activeEditor = vscode.window.activeTextEditor;
 	console.log('Language trigger:', activeEditor?.document.languageId);
 	telemetryService.sendTelemetryEvent('pluginActivation', { trigger: `language=${activeEditor?.document.languageId}` });

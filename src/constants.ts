@@ -1,15 +1,15 @@
 // // Plugin
-export const PLUGIN = 'libmig';
-export const PLUGIN_TITLE = 'LibMig';
+export const PLUGIN = 'migmate';
+export const PLUGIN_TITLE = 'MigMate';
 export const ROUNDS = ['premig', 'llmmig']; //, 'merge_skipped', 'async_transform'];
 export const ROUND_TITLES = ['Pre-Migration', 'LLM Migration', 'Merge Skipped', 'Async Transform'];
 export const ROUND_FOLDERS = ROUNDS.map((round, index) => `${index}-${round}`);
 
 // // Command IDs
 export const COMMANDS = {
-    MIGRATE: 'libmig.migrate',
-    VIEW_TEST_RESULTS: 'libmig.viewTestResults',
-    SET_API_KEY: 'libmig.setApiKey',
+    MIGRATE: 'migmate.migrate',
+    VIEW_TEST_RESULTS: 'migmate.viewTestResults',
+    SET_API_KEY: 'migmate.setApiKey',
 };
 
 // // Config Keys
@@ -50,6 +50,6 @@ export const TELEMETRY = {
 
 // // API Key IDs
 export const API_KEY_ID = {
-    LIBRARIES: 'libmig.librariesioApiKey',
-    OPENAI: 'libmig.openaiApiKey',
+    LIBRARIES: 'migmate.librariesioApiKey',
+    OPENAI: 'migmate.openaiApiKey',
 };

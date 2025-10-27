@@ -6,7 +6,7 @@ class LoggingService {
     private channel: vscode.OutputChannel;
 
     constructor() {
-        this.channel = vscode.window.createOutputChannel('LibMig');
+        this.channel = vscode.window.createOutputChannel('MigMate');
     }
 
     public info(message: string): void {
