@@ -19,12 +19,12 @@ export class FileProcessor { // update the file blob patterns
 
         const requirementsFiles = await vscode.workspace.findFiles(new vscode.RelativePattern(workspacePath, '**/requirements.txt')); // check this
 
-        logger.info(`Found ${pythonFiles.length} Python files and ${requirementsFiles.length} requirements files`);
+        logger.info(`Found ${pythonFiles.length} Python files and ${requirementsFiles.length} dependency files`);
         return { pythonFiles, requirementsFiles };
     }
 
     public compareFiles(comparisonFiles: vscode.Uri[], workspacePath: string, comparePath: string): Omit<MigrationChange, 'hunks'>[] {
-        logger.info(`Comparing files in workspace ${workspacePath} against migrated copies in: ${comparePath}`);
+        logger.info('Comparing pre-migration files against migrated copies...');
         const changes: Omit<MigrationChange, 'hunks'>[] = [];
 
         for (const fileUri of comparisonFiles) {

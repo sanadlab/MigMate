@@ -1,7 +1,7 @@
 // // Plugin
 export const PLUGIN = 'libmig';
 export const PLUGIN_TITLE = 'LibMig';
-export const ROUNDS = ['premig', 'llmmig', 'merge_skipped', 'async_transform'];
+export const ROUNDS = ['premig', 'llmmig']; //, 'merge_skipped', 'async_transform'];
 export const ROUND_TITLES = ['Pre-Migration', 'LLM Migration', 'Merge Skipped', 'Async Transform'];
 export const ROUND_FOLDERS = ROUNDS.map((round, index) => `${index}-${round}`);
 
@@ -9,7 +9,6 @@ export const ROUND_FOLDERS = ROUNDS.map((round, index) => `${index}-${round}`);
 export const COMMANDS = {
     MIGRATE: 'libmig.migrate',
     VIEW_TEST_RESULTS: 'libmig.viewTestResults',
-    HEALTH_CHECK: 'libmig.healthCheck',
     SET_API_KEY: 'libmig.setApiKey',
 };
 
@@ -19,6 +18,7 @@ export const CONFIG = {
     USE_CACHE: 'flags.useCache',
     FORCE_RERUN: 'flags.forceRerun',
     SKIP_TESTS: 'flags.smartSkipTests',
+    SHOW_CLI_OUTPUT: 'options.showCliOutput',
     MIG_FAILURE_PREVIEW: 'options.previewOnMigrationFailure',
     LIBRARY_SUGGESTIONS: 'options.enableSuggestions (Experimental)',
     // // Integers

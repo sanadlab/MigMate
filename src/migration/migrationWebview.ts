@@ -14,11 +14,11 @@ export class MigrationWebview {
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel(
                 'migPreview',
-                `Migration Preview: ${srcLib} → ${tgtLib}`,
+                `Migration Preview`, //: ${srcLib} → ${tgtLib}`,
                 vscode.ViewColumn.One,
                 {
                     enableScripts: true,
-                    retainContextWhenHidden: false
+                    retainContextWhenHidden: true
                 }
             );
 
@@ -39,21 +39,25 @@ export class MigrationWebview {
             async message => {
                 switch (message.command) {
                     case 'applyChanges':
+                        logger.info('Applying all Webview migration changes...');
                         await this.applySelectedChanges(message.files);
                         this.panel?.dispose();
                         break;
 
                     case 'cancel':
+                        logger.info('Cancelled Webview migration');
                         this.panel?.dispose();
                         break;
 
                     case 'jumpToFile':
+                        // logger.info(`Jumping to file ${path.basename(message.filePath)}...`);
                         const uri = vscode.Uri.file(message.filePath);
                         const document = await vscode.workspace.openTextDocument(uri);
                         await vscode.window.showTextDocument(document);
                         break;
 
                     case 'viewDiff':
+                        // logger.info(`Viewing diff for ${path.basename(message.filePath)}...`);
                         const originalUri = vscode.Uri.file(message.filePath);
                         const change = migrationState.getChange(originalUri);
                         if (change) {
@@ -137,7 +141,10 @@ export class MigrationWebview {
                 for (const docPath of docsToSave) {
                     const uri = vscode.Uri.file(docPath);
                     const doc = await vscode.workspace.openTextDocument(uri);
-                    await doc.save();
+                    const saved = await doc.save();
+                    if (saved) {
+                        logger.info(`Applied file changes to ${path.basename(docPath)}`);
+                    }
                 }
                 vscode.window.showInformationMessage('Migration changes applied successfully');
             } else {
@@ -545,7 +552,9 @@ export class MigrationWebview {
                 }
             }
             contentHtml += '</div>';
-            const totalChanges = Object.keys(lineDetails).length;
+            // const totalChanges = Object.keys(lineDetails).length;
+            const totalChanges = Math.floor(new Set(hunks.map(hunk => hunk.id)).size / 2); // check this, maybe count loops above instead
+            // console.log(hunks);
 
             return `<details class="file-item" data-file-path="${filePath}" data-file-index="${fileIndex}" open>
                 <summary class="file-header">

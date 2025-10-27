@@ -65,10 +65,10 @@ export async function checkTestResults(baseDir: string): Promise<TestResults> {
     };
 
     if (!fs.existsSync(outputDir)) {
-        logger.warn(`No output directory found at path: ${outputDir}`);
+        logger.warn(`No output directory '${outDirName}' found in workspace`);
         return results;
     }
-    logger.info(`Searching for test results in: ${outputDir}`);
+    logger.info(`Searching for test results in '${outDirName}'...`);
     results.migrationDetails = getMigrationDetails(outputDir);
 
     // // Try to read the log.md file
@@ -470,7 +470,7 @@ function generateTestResultsHtml(results: TestResults): string {
                 margin-bottom: 15px;
             }
             .failure {
-                background: var(--vscode-editorError-background, #2d2d2d);
+                background: var(--vscode-editorWidget-background, #2d2d2d);
                 border-left: 3px solid var(--vscode-testing-iconFailed, #f14c4c);
                 padding: 10px;
                 margin-bottom: 15px;

@@ -32,7 +32,7 @@ export class MigrationService {
     public async runMigration(hoverLibrary?: string): Promise<void> {
         if (this.activeMigration) {
             logger.warn("Migration triggered while another migration is already running");
-            vscode.window.showInformationMessage("A migration is already in progress.");
+            vscode.window.showInformationMessage("A migration is already in progress");
             return;
         }
 
@@ -52,7 +52,6 @@ export class MigrationService {
                 progress.report({ message: "Selecting libraries...", increment: 5 });
                 const { srcLib, tgtLib } = await this.selectLibraries(hoverLibrary);
                 await this.runDirectMigration(workspacePath, srcLib, tgtLib, progress);
-                progress.report({ message: "Done.", increment: 10 });
             } catch (error) {
                 const err = error as Error;
                 logger.error('Migration failed', err);
@@ -66,9 +65,9 @@ export class MigrationService {
     }
 
     private async runDirectMigration(workspacePath: string, srcLib: string, tgtLib: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
-        logger.info(`Running migration directly on workspace: ${workspacePath}`);
         try {
             // // Check for git repository in workspace (CLI also checks, but fails silently?)
+            progress.report({ message: "Checking Git repository...", increment: 5 });
             const isRepo = await this.environmentManager.checkGitRepository(workspacePath);
             if(!isRepo) {
                 logger.error('No git repository found in workspace');
@@ -76,14 +75,21 @@ export class MigrationService {
             }
 
             // // Save Python filepaths before migration
+            progress.report({ message: "Finding Python files...", increment: 5 });
             const { pythonFiles } = await this.fileProcessor.findPythonFiles(workspacePath);
             progress.report({ message: `Migrating from ${srcLib} to ${tgtLib}...`, increment: 30 });
             await this.migrationExecutor.executeMigration(srcLib, tgtLib, workspacePath);
+
+            const previewOnFailure = configService.get(CONFIG.MIG_FAILURE_PREVIEW, false);
+            const outDirName = configService.get(CONFIG.OUTPUT_PATH, '.libmig');
+            const outputDir = path.join(workspacePath, outDirName);
 
             // // Check for test failures
             progress.report({ message: "Checking test results...", increment: 10 });
             const testResults = await checkTestResults(workspacePath);
             if (testResults.hasFailures) {
+                logger.info(`Test failures detected - Migration Preview is currently ${previewOnFailure ? 'enabled' : 'disabled'} on failure`);
+
                 const viewDetailsAction = 'View Details';
                 const response = await vscode.window.showWarningMessage(
                     `${testResults.failureCount} test${testResults.failureCount !== 1 ? 's' : ''} failed during migration.`,
@@ -95,7 +101,6 @@ export class MigrationService {
             }
 
             // // Check output folder for saved files (start from later rounds) // check this
-            const outputDir = path.join(workspacePath, configService.get(CONFIG.OUTPUT_PATH, '.libmig'));
             const roundFolders = ROUND_FOLDERS;
             let migratedFilesDir: string | undefined;
 
@@ -104,13 +109,13 @@ export class MigrationService {
                 const potentialDir = path.join(outputDir, folder, 'files');
                 if (fs.existsSync(potentialDir)) {
                     migratedFilesDir = potentialDir;
-                    logger.info(`Found latest migration output at ${potentialDir}`);
+                    logger.info(`Found latest migration output under '${outDirName}/${folder}'`);
                     break; // check this // not sure if subsequent CLI calls remove round folders and start fresh
                 }
             }
 
             if (!migratedFilesDir) {
-                    logger.warn(`Migrated files not found in ${outputDir}`);
+                    logger.warn(`Migrated files not found in ${outDirName}`);
                     vscode.window.showWarningMessage("Migrated files not found. Cannot show preview.");
                     await this.environmentManager.gitResetHard(workspacePath); // always perform git reset
                     return;
@@ -128,17 +133,19 @@ export class MigrationService {
             // // Save results and show preview
             this.environmentManager.saveResultsPath(this.context, outputDir);
             progress.report({ message: "Generating preview...", increment: 10 });
-            await this.previewManager.showChanges(changes, srcLib, tgtLib);
+            if (!testResults.hasFailures || previewOnFailure) {
+                await this.previewManager.showChanges(changes, srcLib, tgtLib);
+            }
 
-            logger.info('Migration process completed successfully (direct)');
-            telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, mode: 'direct', changesFound: changes.length.toString() });
+            logger.info('Migration process completed successfully');
+            telemetryService.sendTelemetryEvent('migrationCompleted', { source: srcLib, target: tgtLib, changesFound: changes.length.toString() });
         } catch (error) {
-            logger.error('Error during migration process (direct)', error as Error);
+            logger.error('Error during migration process', error as Error);
             try {
                 await this.environmentManager.gitResetHard(workspacePath);
-                logger.info('Succesfully reset workspace after direct migration error');
+                logger.info('Succesfully reset workspace after migration error');
             } catch (gitError) {
-                logger.error('Failed to revert workspace after direct migration error');
+                logger.error('Failed to revert workspace after migration error');
             }
             throw error;
         }
@@ -151,7 +158,6 @@ export class MigrationService {
             throw new Error('No workspace folder is open. Please open a project to run this command.');
         }
         const workspacePath = workspaceFolders[0].uri.fsPath;
-        logger.info(`Using workspace path: ${workspacePath}`);
         return workspacePath;
     }
 
@@ -160,21 +166,21 @@ export class MigrationService {
         const libraries = await getLibrariesFromRequirements();
         if (libraries.length <= 0) {
             logger.warn('No libraries found in requirements file');
-            vscode.window.showWarningMessage('No libraries found in requirements file.');
+            vscode.window.showWarningMessage('No libraries found in requirements file');
         }
 
         const srcLib = await getSourceLibrary(hoverLibrary, libraries);
         if (!srcLib) {
             logger.warn('Migration cancelled: No source library selected');
             telemetryService.sendTelemetryEvent('migrationCancelled', { reason: 'noSourceLibrary' });
-            throw new Error('No source library selected.');
+            throw new Error('No source library selected');
         }
 
         const tgtLib = await getTargetLibrary(srcLib);
         if (!tgtLib) {
             logger.warn('Migration cancelled: No target library selected');
             telemetryService.sendTelemetryEvent('migrationCancelled', { reason: 'noTargetLibrary' });
-            throw new Error('No target library selected.');
+            throw new Error('No target library selected');
         }
 
         logger.info(`Selected libraries for migration: '${srcLib}' to '${tgtLib}'`);

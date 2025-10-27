@@ -9,7 +9,9 @@ import { CONFIG, PLUGIN_TITLE, ROUNDS } from '../constants';
 // // Run target command in CLI
 export function runCliTool(command: string, cwd: string, env: NodeJS.ProcessEnv = {}) {
     logger.show();
-    logger.info(`Running command in ${cwd}: ${command}`);
+    logger.info(`Running command: ${command}`);
+
+    const showCliOutput = configService.get(CONFIG.SHOW_CLI_OUTPUT);
 
     // // add timeout?
     // const startTime = Date.now();
@@ -21,10 +23,14 @@ export function runCliTool(command: string, cwd: string, env: NodeJS.ProcessEnv 
         const child = spawn(cmd, args, { cwd, shell: true, env: migrationEnv });
 
         child.stdout.on('data', (data: Buffer) => {
-            logger.append(data.toString());
+            if (showCliOutput) {
+                logger.append(data.toString());
+            }
         });
         child.stderr.on('data', (data: Buffer) => {
-            logger.append(data.toString());
+            if (showCliOutput) {
+                logger.append(data.toString());
+            }
         });
         child.on('close', (code) => {
             logger.info(`Command finished with exit code: ${code}`);

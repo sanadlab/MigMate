@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { configService } from './services/config';
-import { exec } from 'child_process';
 import { telemetryService } from './services/telemetry';
 import { logger } from './services/logging';
 import { checkTestResults, showTestResultsView } from './services/testResultWebview';
-import * as fs from 'fs';
 import { COMMANDS, API_KEY_ID } from './constants';
 import { MigrationService } from './migration/migrationService';
-import { MigrationWebview } from './migration/migrationWebview';
 
 
 
@@ -33,30 +31,6 @@ export function registerCommands(context: vscode.ExtensionContext) {
 		}
 		const testResults = await checkTestResults(resultsDir);
 		showTestResultsView(testResults);
-	});
-
-
-
-	// // Temp to display experimental migration webview
-	const viewWebviewCommand = vscode.commands.registerCommand('libmig.viewWebview', async () => {
-		const webview = new MigrationWebview();
-		await webview.showPreview([], 'requests', 'httpx');
-	});
-
-
-
-	// // Check CLI tool using '--help' flag, check config
-	const healthCheck = vscode.commands.registerCommand(COMMANDS.HEALTH_CHECK, () => {
-		exec('libmig --help', (err, stdout, stderr) => {
-			if (err) {
-				vscode.window.showErrorMessage(`Error: ${err.message}`);
-				return;
-			}
-			if (stderr) {
-				vscode.window.showWarningMessage(`Stderr: ${stderr}`);
-			}
-			vscode.window.showInformationMessage(`Output: ${stdout}`);
-		});
 	});
 
 
@@ -97,5 +71,5 @@ export function registerCommands(context: vscode.ExtensionContext) {
 
 
 
-	context.subscriptions.push(migrateCommand, viewTestResultsCommand, healthCheck, setAPI);
+	context.subscriptions.push(migrateCommand, viewTestResultsCommand, setAPI);
 }

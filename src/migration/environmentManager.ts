@@ -1,21 +1,17 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import { execSync, exec } from 'child_process';
 import { logger } from '../services/logging';
-import { PLUGIN } from '../constants';
 
 
 
 export class EnvironmentManager {
     // // Various git commands
-    public initGitRepository(tempDir: string): void { // only use for temp --> maybe repurpose as option during direct?
+    public initGitRepository(dir: string): void { // only use for temp --> maybe repurpose as option during direct?
         try {
-            logger.info('Initializing git repository in temporary directory');
-            execSync('git init', { cwd: tempDir });
-            execSync('git add .', { cwd: tempDir });
-            execSync('git commit -m "Initial state for migration"', { cwd: tempDir });
+            logger.info('Initializing git repository in directory');
+            execSync('git init', { cwd: dir });
+            execSync('git add .', { cwd: dir });
+            execSync('git commit -m "Initial state for migration"', { cwd: dir });
             logger.info('Git repository initialized successfully');
         } catch (error) {
             const err = error as Error;
@@ -53,6 +49,6 @@ export class EnvironmentManager {
     // // Misc.
     public saveResultsPath(context: vscode.ExtensionContext, resultsDir: string): void {
         context.workspaceState.update('lastMigrationResults', resultsDir);
-        logger.info(`Saved results path to workspace state: ${resultsDir}`);
+        // logger.info(`Saved results path to workspace state: ${resultsDir}`);
     }
 }

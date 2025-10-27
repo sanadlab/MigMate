@@ -10,7 +10,7 @@ export class MigrationExecutor {
     constructor(private context: vscode.ExtensionContext) {}
 
     public async executeMigration(srcLib: string, tgtLib: string, workspacePath: string): Promise<void> {
-        logger.info(`Executing migration from '${srcLib}' to '${tgtLib}' in ${workspacePath}`);
+        logger.info(`Executing migration from '${srcLib}' to '${tgtLib}'`);
         const command = buildCliCommand(srcLib, tgtLib);
 
         const env: NodeJS.ProcessEnv = {};
@@ -21,6 +21,6 @@ export class MigrationExecutor {
 
         await vscode.workspace.saveAll();
         await runCliTool(command, workspacePath, env);
-        logger.info('Migration execution completed');
+        logger.info('CLI migration completed');
     }
 }
