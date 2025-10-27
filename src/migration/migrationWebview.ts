@@ -44,8 +44,8 @@ export class MigrationWebview {
                         this.panel?.dispose();
                         break;
 
-                    case 'cancel':
-                        logger.info('Cancelled Webview migration');
+                    case 'close':
+                        logger.info('Closed Webview migration');
                         this.panel?.dispose();
                         break;
 
@@ -231,7 +231,7 @@ export class MigrationWebview {
             ${this.generateHeader(srcLib, tgtLib, changes.length)}
             <div class="files-list">${fileItemsHtml}</div>
             <div class="buttons">
-                <button class="cancel-button">Close Preview</button>
+                <button class="close-button">Close Preview</button>
                 <button class="apply-all-button">Apply All Changes</button>
             </div>
             ${this.generateScript(filesData)}
@@ -422,7 +422,7 @@ export class MigrationWebview {
                 // border-top: 1px solid var(--vscode-panel-border);
                 gap: 10px;
             }
-            .cancel-button {
+            .close-button {
                 background: var(--vscode-button-secondaryBackground);
                 color: var(--vscode-button-secondaryForeground);
                 border: none;
@@ -456,25 +456,30 @@ export class MigrationWebview {
     private async generateFileItem(change: MigrationChange, fileIndex: number): Promise<string> {
         try {
             const filePath = change.uri.fsPath;
-            const doc = await vscode.workspace.openTextDocument(change.uri);
-            const fileContent = doc.getText();
+            // const doc = await vscode.workspace.openTextDocument(change.uri);
+            // const fileContent = doc.getText();
+            const fileContent = change.originalContent;
             const fileLines = fileContent.split(/\r?\n/);
             const lineDetails: { [key: number]: { type: string, hunkIds: number[], content?: string } } = {};
             const hunks = change.hunks;
 
-            // // Handle removals first
+            // console.log(`Processing file: ${filePath}`);
+            // console.log('File content:', fileContent);
+            // console.log(`File content length: ${fileContent.length}`);
+            // console.log(`Number of lines: ${fileLines.length}`);
+            // console.log('Hunks:', hunks);
+
             for (const hunk of hunks) {
+                // // Handle removals first
                 if (hunk.type === 'removed') {
                     for (let i = 0; i < hunk.lines.length; i++) {
                         const lineNum = hunk.originalStartLine + i;
+                        console.log(`Adding removed line to lineDetails: ${lineNum}`);
                         lineDetails[lineNum] = { type: 'removed', hunkIds: [hunk.id] };
                     }
                 }
-            }
-
-            // // Handle additions and check if part of a replacement
-            for (const hunk of hunks) {
-                if (hunk.type === 'added') {
+                // // Handle additions and check if part of a replacement
+                else if (hunk.type === 'added') {
                     const pairedHunk = DiffUtils.findPairedHunk(hunk, hunks);
                     if (pairedHunk) {
                         // // Replacement case
@@ -487,14 +492,11 @@ export class MigrationWebview {
                     } else {
                         // // Standalone addition
                         const targetLine = hunk.originalStartLine;
-                        lineDetails[targetLine] = {
-                            type: 'added',
-                            hunkIds: [hunk.id],
-                            content: hunk.lines.join('\n')
-                        };
+                        lineDetails[targetLine] = {type: 'added', hunkIds: [hunk.id], content: hunk.lines.join('\n')};
                     }
                 }
             }
+            console.log('Final lineDetails:', lineDetails);
 
             let contentHtml = '<div class="file-content">';
             let oldLineNum = 1;
@@ -512,6 +514,9 @@ export class MigrationWebview {
                         let endLine = lineIndex;
                         while(lineDetails[endLine + 1] && lineDetails[endLine + 1].type === 'removed') {
                             endLine++;
+                            // if (endLine - lineIndex > 1000) {
+                            //     throw new Error(`Excessive lines (1000+) detected in hunk processing for file ${path.basename(filePath)}`);
+                            // }
                         }
                         for (let j = lineIndex; j <= endLine; j++) {
                             changeBlockHtml += `<div class="line-container">
@@ -555,6 +560,7 @@ export class MigrationWebview {
             // const totalChanges = Object.keys(lineDetails).length;
             const totalChanges = Math.floor(new Set(hunks.map(hunk => hunk.id)).size / 2); // check this, maybe count loops above instead
             // console.log(hunks);
+            // console.log('Line details:', lineDetails);
 
             return `<details class="file-item" data-file-path="${filePath}" data-file-index="${fileIndex}" open>
                 <summary class="file-header">
@@ -570,7 +576,7 @@ export class MigrationWebview {
                 ${contentHtml}
             </details>`;
         } catch (error) {
-            logger.error(`Error generating file item HTML for ${change.uri.fsPath}: ${error}`);
+            logger.error(`Error generating file item HTML for ${path.basename(change.uri.fsPath)}: ${error}`);
             return `<div class="file-item error">Could not load preview for ${path.basename(change.uri.fsPath)}.</div>`;
         }
     }
@@ -666,10 +672,10 @@ export class MigrationWebview {
                     });
                 });
 
-                // // Handle cancel button
-                document.querySelector('.cancel-button').addEventListener('click', () => {
+                // // Handle close button
+                document.querySelector('.close-button').addEventListener('click', () => {
                     vscode.postMessage({
-                        command: 'cancel'
+                        command: 'close'
                     });
                 });
             });
