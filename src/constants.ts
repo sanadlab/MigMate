@@ -1,7 +1,7 @@
 // // Plugin
 export const PLUGIN = 'migmate';
 export const PLUGIN_TITLE = 'MigMate';
-export const ROUNDS = ['premig', 'llmmig']; //, 'merge_skipped', 'async_transform'];
+export const ROUNDS = ['premig', 'llmmig', 'merge_skipped', 'async_transform'];
 export const ROUND_TITLES = ['Pre-Migration', 'LLM Migration', 'Merge Skipped', 'Async Transform'];
 export const ROUND_FOLDERS = ROUNDS.map((round, index) => `${index}-${round}`);
 
