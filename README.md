@@ -2,20 +2,27 @@
   <img src="https://avatars.githubusercontent.com/u/187389012?s=200&v=4" alt="NYU AD Logo">
 </div>
 
-# CS Capstone - MigMate Plugin
+# MigMate
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Project Information
 
-This is a CS Capstone project by Matthias Kebede, being advised by Sarah Nadi and May Mahmoud. The objective of the project is to create a plugin that integrates PyMigTool into Visual Studio Code. PyMigTool is a CLI tool that allows user to automate the migration of Python libraries by using LLMs.
+MigMate is a plugin that integrates PyMigTool into Visual Studio Code. [PyMigTool](https://github.com/sanadlab/PyMigTool) is a CLI tool that allows users to automate the migration of Python libraries by adding pre-processing and post-processing to an LLM-powered migration.
 
 ## Table of Contents
 
   - [Project Setup](#project-setup)
     - [Prerequisites](#prerequisites)
     - [Installation](#install-and-run)
+    - [Packaging](#packaging)
   - [Usage](#usage)
+    - [Overview](#overview)
+    - [Plugin Activation](#plugin-activation)
+    - [Set API Key](#set-api-key)
+    - [Initiate a Migration](#initiate-a-migration)
+    - [Configuration](#configuration)
+  - [Telemetry](#telemetry)
 
 ## Project Setup
 
@@ -76,7 +83,7 @@ If you would prefer to package the extension locally, follow these steps instead
 
 ### Overview
 
-With VS Code open and the extension running, you can now use the plugin's commands (make sure you are in the right VS Code window if using the Extension Development Host). Press `CTRL+SHIFT+P` to access the Command Palette. You can also see [VS Code Extension Quickstart](./vsc-extension-quickstart.md) for more information on extension basics.
+With VS Code open and the extension running, you can now use the plugin's commands (make sure you are in the right VS Code window if using the Extension Development Host). Press `CTRL+SHIFT+P` to access the Command Palette. You can also see [VS Code Extension Quickstart](./docs/vsc-extension-quickstart.md) for more information on extension basics.
 
 Commands:
 - MigMate: Migrate a Library
