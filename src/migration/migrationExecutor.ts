@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { buildCliCommand, runCliTool } from '../services/cli';
+import { telemetryService } from '../services/telemetry';
 import { logger } from '../services/logging';
 import { API_KEY_ID } from '../constants';
 
@@ -20,7 +21,10 @@ export class MigrationExecutor {
         }
 
         await vscode.workspace.saveAll();
+        const startTime = Date.now();
         await runCliTool(command, workspacePath, env);
+        const duration = Date.now() - startTime;
         logger.info('CLI migration completed');
+        telemetryService.sendTelemetryEvent('migrationDuration', { source: srcLib, target: tgtLib }, { durationMs: duration });
     }
 }

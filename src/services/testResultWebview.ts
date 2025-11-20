@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { logger } from './logging';
+import { telemetryService } from './telemetry';
 import { escapeHtml, formatRoundName } from '../webviewUtils';
 import { configService } from './config';
 import { CONFIG, PLUGIN, ROUND_FOLDERS } from '../constants';
@@ -257,6 +258,7 @@ function getMigrationDetails(outputDir: string): MigrationDetails | undefined {
 // // Show test results in a WebView panel
 export function showTestResultsView(results: TestResults): void {
     const column = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
+    telemetryService.sendTelemetryEvent('viewTestResults', {failCount: String(results.failureCount)});
 
     // // Show existing webview panel
     if (currentPanel) {

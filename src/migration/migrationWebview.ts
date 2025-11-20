@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { MigrationChange, DiffHunk, migrationState } from './migrationState';
 import { logger } from '../services/logging';
+import { telemetryService } from '../services/telemetry';
 import { DiffUtils } from './diffUtils';
 import { escapeHtml } from '../webviewUtils';
 import { PLUGIN } from '../constants';
@@ -40,17 +41,21 @@ export class MigrationWebview {
                 switch (message.command) {
                     case 'applyChanges':
                         logger.info('Applying all Webview migration changes...');
+                        const fileCount = message.files.length;
+                        telemetryService.sendTelemetryEvent('webviewAllChanges', {fileCount: fileCount.toString()});
                         await this.applySelectedChanges(message.files);
                         this.panel?.dispose();
                         break;
 
                     case 'close':
                         logger.info('Closed Webview migration');
+                        telemetryService.sendTelemetryEvent('webviewClosed');
                         this.panel?.dispose();
                         break;
 
                     case 'jumpToFile':
                         // logger.info(`Jumping to file ${path.basename(message.filePath)}...`);
+                        telemetryService.sendTelemetryEvent('webviewJumpToFile', {file: path.basename(message.filePath)});
                         const uri = vscode.Uri.file(message.filePath);
                         const document = await vscode.workspace.openTextDocument(uri);
                         await vscode.window.showTextDocument(document);
@@ -58,6 +63,7 @@ export class MigrationWebview {
 
                     case 'viewDiff':
                         // logger.info(`Viewing diff for ${path.basename(message.filePath)}...`);
+                        telemetryService.sendTelemetryEvent('webviewViewDiff', {file: path.basename(message.filePath)});
                         const originalUri = vscode.Uri.file(message.filePath);
                         const change = migrationState.getChange(originalUri);
                         if (change) {
@@ -68,10 +74,12 @@ export class MigrationWebview {
                         break;
 
                     case 'applyFileChanges':
+                        telemetryService.sendTelemetryEvent('webviewFileChanges', {file: path.basename(message.filePath)});
                         await this.applyFileChanges(message.filePath);
                         break;
 
                     case 'applySingleChange':
+                        telemetryService.sendTelemetryEvent('webviewSingleChange', {file: path.basename(message.filePath), hunkId: message.hunkId});
                         await this.applySingleChange(
                             message.filePath,
                             message.hunkId

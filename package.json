@@ -116,7 +116,7 @@
               "gpt-4o",
               "gpt-4.1"
             ],
-            "default": "gpt-4o-mini",
+            "default": "gpt-4o",
             "order": 9,
             "description": "Select an LLM client to use for migration."
           },
@@ -128,7 +128,7 @@
           },
           "migmate.options.previewOnMigrationFailure": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "order": 11,
             "description": "Show a preview for failed migrations."
           },
